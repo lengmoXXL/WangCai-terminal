@@ -5,11 +5,10 @@ const { mkdtempSync, mkdirSync, readFileSync, rmSync, realpathSync } = require('
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { createWorkspace, waitForShell, wangcaiApp, writeInit } = require('./harness.cjs');
+const { createWorkspace, launchApp, waitForShell, wangcaiApp, writeInit } = require('./harness.cjs');
 
-/** The checkout next to this repository runs this plugin; its Electron launches the app. */
+/** The checkout next to this repository, which these tests drive. */
 const app = wangcaiApp();
-const { _electron: electron } = require(join(app ?? '../WangCai', 'node_modules/playwright'));
 
 test('the terminal view opens its own shell in the sidebar, reattaches it and kills it when closed', { timeout: 180000 }, async () => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'wangcai-terminal-')));
@@ -30,7 +29,7 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   };
   let desktop;
   const launch = async () => {
-    desktop = await electron.launch({ executablePath: require(join(app, 'node_modules/electron')), args: [join(app, 'desktop'), `--user-data-dir=${join(home, 'electron')}`], cwd: app, env });
+    desktop = await launchApp(home, env);
     const page = await desktop.firstWindow();
     await waitForShell(page);
     return page;

@@ -3,12 +3,21 @@ const { join, resolve } = require('node:path');
 
 /**
  * The WangCai checkout next to this repository, which runs this plugin. It has to be built: the app
- * launches in place. Returns undefined when it is not there, so a test can skip rather than fail.
+ * launches in place and loads this plugin's files from this directory. A missing one is an error
+ * rather than a skip, because every test here drives the app.
  */
 exports.wangcaiApp = () => {
   const root = resolve(__dirname, '../../WangCai');
   const built = ['desktop/dist/main/index.js', 'desktop/node/bin/node', 'wangcaicli/dist/debug/wangcai'];
-  return built.every((name) => existsSync(join(root, name))) ? root : undefined;
+  if (!built.every((name) => existsSync(join(root, name)))) throw new Error('build the WangCai checkout next to this repository');
+  return root;
+};
+
+/** Launches that checkout on this home, with the Electron the checkout depends on. */
+exports.launchApp = (home, env) => {
+  const app = exports.wangcaiApp();
+  const { _electron: electron } = require(join(app, 'node_modules/playwright'));
+  return electron.launch({ executablePath: require(join(app, 'node_modules/electron')), args: [join(app, 'desktop'), `--user-data-dir=${join(home, 'electron')}`], cwd: app, env });
 };
 
 /** A plugin checkout next to this one, already built into the files the app loads. */
@@ -36,7 +45,7 @@ exports.writeInit = (home, lists) => {
 exports.waitForShell = (page) => page.locator('.workspaces').waitFor();
 
 /** A right-click on the workspace heading opens the menu of machines a workspace can be opened on. */
-exports.openWorkspaceMenu = (page) => page.locator('.workspace-header').click({ button: 'right' });
+const openWorkspaceMenu = (page) => page.locator('.workspace-header').click({ button: 'right' });
 
 /** Waits until the workspace in front has a terminal that takes input; a session id alone is not enough. */
 const waitForTerminal = async (page) => {
@@ -54,7 +63,7 @@ const waitForTerminal = async (page) => {
 
 /** The list menu offers one entry per machine; picking the local one opens a workspace on it. */
 exports.createWorkspace = async (page) => {
-  await exports.openWorkspaceMenu(page);
+  await openWorkspaceMenu(page);
   await page.locator('#workspace-row-menu').getByRole('menuitem', { name: '本机', exact: true }).click();
   await page.locator('.terminal-pane.active .xterm-helper-textarea').waitFor();
   await waitForTerminal(page);
