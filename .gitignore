@@ -1,0 +1,11 @@
+node_modules/
+main.cjs
+main.cjs.map
+ui.js
+ui.js.map
+ui.css
+ui.css.map
+ui.worker.js
+ui.worker.js.map
+tests/dist/
+codicon-*.ttf

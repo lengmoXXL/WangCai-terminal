@@ -1,0 +1,11 @@
+.wangcai-terminal { height: 100%; color: var(--wc-foreground); }
+.wangcai-terminal, .wangcai-terminal * { box-sizing: border-box; }
+.wangcai-terminal .terminal-pane { height: 100%; display: flex; flex-direction: column; padding: 6px; }
+.wangcai-terminal .terminal-surface { flex: 1; min-height: 0; }
+/* xterm rounds each row width but lays the glyphs out on the unrounded grid, so size rows to their content. */
+.wangcai-terminal .terminal-surface .xterm-rows > div { width: max-content !important; }
+/* xterm draws its own scrollbar; the viewport's native one only steals the width the grid is sized for. */
+.wangcai-terminal .terminal-surface .xterm-viewport::-webkit-scrollbar { display: none; }
+.wangcai-terminal .terminal-message { flex-shrink: 0; color: var(--wc-muted); font-size: 11px; }
+.wangcai-terminal > .terminal-message { padding: 10px; }
+.wangcai-terminal .terminal-message.error { color: var(--wc-red); overflow-wrap: anywhere; }
