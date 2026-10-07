@@ -13,6 +13,13 @@ exports.wangcaiApp = () => {
   return root;
 };
 
+/** The environment a test runs the app in: its own home, and none of the variables a dev run exports. */
+exports.testEnv = (home) => {
+  const env = { ...process.env, HOME: home, WANGCAI_HOME: '', SHELL: '/bin/bash', ELECTRON_RENDERER_URL: '' };
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
+};
+
 /** Launches that checkout on this home, with the Electron the checkout depends on. */
 exports.launchApp = (home, env) => {
   const app = exports.wangcaiApp();

@@ -1,11 +1,11 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { connect } = require('@wangcai/sdk');
+const { connect } = require('@lengmoxxl/sdk');
 const { mkdtempSync, mkdirSync, readFileSync, rmSync, realpathSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { createWorkspace, launchApp, waitForShell, wangcaiApp, writeInit } = require('./harness.cjs');
+const { createWorkspace, launchApp, testEnv, waitForShell, wangcaiApp, writeInit } = require('./harness.cjs');
 
 /** The checkout next to this repository, which these tests drive. */
 const app = wangcaiApp();
@@ -15,8 +15,7 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   const previousHome = process.env.HOME;
   process.env.HOME = home;
   process.env.WANGCAI_HOME = '';
-  const env = { ...process.env, HOME: home, SHELL: '/bin/bash', ELECTRON_RENDERER_URL: '' };
-  delete env.ELECTRON_RUN_AS_NODE;
+  const env = testEnv(home);
   const binary = join(app, 'wangcaicli/dist/debug/wangcai');
   const directory = join(home, '示例 project');
   const store = join(home, '.local/share/wangcai/data/terminal/sessions.json');

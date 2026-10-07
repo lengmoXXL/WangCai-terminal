@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
-import type { FileClick, Machine, MachineConnection } from '@wangcai/sdk';
-import type { MainContext } from '@wangcai/sdk/channel';
+import type { FileClick, Machine, MachineConnection } from '@lengmoxxl/sdk';
+import type { MainContext } from '@lengmoxxl/sdk/channel';
 
 /** How long a path stays answered. */
 const resolvedTtl = 10_000;

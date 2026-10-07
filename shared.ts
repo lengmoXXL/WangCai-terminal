@@ -1,4 +1,4 @@
-import type { Machine, Profile } from '@wangcai/sdk';
+import type { Machine, Profile } from '@lengmoxxl/sdk';
 export type { Machine };
 
 // The config this plugin accepts: main.ts declares a schema for the same fields.

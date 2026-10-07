@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { connect, type MachineConnection, type Pty, type WorkspaceActive } from '@wangcai/sdk';
-import type { MainContext } from '@wangcai/sdk/channel';
+import { connect, type MachineConnection, type Pty, type WorkspaceActive } from '@lengmoxxl/sdk';
+import type { MainContext } from '@lengmoxxl/sdk/channel';
 import { registerFilePaths } from './file-links/paths';
 import type { Machine, TerminalRef } from './shared';
 

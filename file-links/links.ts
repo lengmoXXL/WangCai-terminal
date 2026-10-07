@@ -1,6 +1,6 @@
 import { computeLink } from 'xterm-link-provider';
 import type { IBufferCellPosition, IBufferRange, Terminal } from '@xterm/xterm';
-import type { FileClick } from '@wangcai/sdk';
+import type { FileClick } from '@lengmoxxl/sdk';
 
 type FileLocation = Pick<FileClick, 'path' | 'line' | 'column'>;
 
