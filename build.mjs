@@ -3,7 +3,7 @@ import esbuild from 'esbuild';
 
 /** @type {import('esbuild').BuildOptions} */
 const mainOptions = {
-  bundle: true, platform: 'node', target: 'node22', sourcemap: 'linked', external: ['@lengmoxxl/sdk'],
+  bundle: true, platform: 'node', target: 'node22', sourcemap: 'linked',
   supported: { 'dynamic-import': false },
 };
 /** @type {import('esbuild').BuildOptions} */
@@ -13,7 +13,7 @@ const uiOptions = {
 };
 
 // The app loads what this writes: main.cjs runs in the main process, ui.js is the renderer entry and
-// ui.css sits next to it. Everything but the SDK is bundled, so the app never needs this repository's
+// ui.css sits next to it. Everything the runtime needs is bundled, so the app never needs this repository's
 // dependencies and never compiles a plugin itself.
 const source = import.meta.dirname;
 await esbuild.build({ ...mainOptions, absWorkingDir: source, entryPoints: ['main.ts'], outfile: join(source, 'main.cjs') });

@@ -15,7 +15,7 @@
     "typecheck": "tsc"
   },
   "devDependencies": {
-    "@lengmoxxl/sdk": "^0.1.0",
+    "@lengmoxxl/sdk": "^0.1.1",
     "@types/node": "^24.19.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

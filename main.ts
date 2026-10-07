@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { connect, type MachineConnection, type Pty, type WorkspaceActive } from '@lengmoxxl/sdk';
+import type { MachineConnection, Pty, WorkspaceActive } from '@lengmoxxl/sdk';
 import type { MainContext } from '@lengmoxxl/sdk/channel';
 import { registerFilePaths } from './file-links/paths';
 import type { Machine, TerminalRef } from './shared';
@@ -31,9 +31,7 @@ export async function activate(context: MainContext) {
   async function connection(machine: Machine) {
     const existing = connections.get(key(machine));
     if (existing) return existing;
-    const node = await connect(machine.host
-      ? { type: 'ssh', host: machine.host, agent: context.host.agent }
-      : { type: 'local', binary: join(context.host.resourcesDirectory, 'wangcai') });
+    const node = await context.connect(machine);
     connections.set(key(machine), node);
     return node;
   }

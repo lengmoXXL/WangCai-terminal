@@ -1,6 +1,5 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { connect } = require('@lengmoxxl/sdk');
 const { mkdtempSync, mkdirSync, readFileSync, rmSync, realpathSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
@@ -9,6 +8,8 @@ const { createWorkspace, launchApp, testEnv, waitForShell, wangcaiApp, writeInit
 
 /** The checkout next to this repository, which these tests drive. */
 const app = wangcaiApp();
+// The SDK the app itself runs: the published one is only what this plugin compiles its types against.
+const { openMachine } = require(join(app, 'sdk/dist/index.cjs'));
 
 test('the terminal view opens its own shell in the sidebar, reattaches it and kills it when closed', { timeout: 180000 }, async () => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'wangcai-terminal-')));
@@ -21,7 +22,7 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   const store = join(home, '.local/share/wangcai/data/terminal/sessions.json');
   const record = () => Object.keys(JSON.parse(readFileSync(store, 'utf8')))[0];
   const sessions = async () => {
-    const node = await connect({ type: 'local', binary });
+    const node = await openMachine({ type: 'local', binary });
     const list = await node.pty.list();
     node.disconnect();
     return list;
@@ -75,7 +76,7 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
     await page.locator('.sidebar-panel[data-plugin=terminal] .xterm-rows').filter({ hasText: 'TERM_PWD' }).waitFor();
 
     await desktop.close(); desktop = undefined;
-    const node = await connect({ type: 'local', binary });
+    const node = await openMachine({ type: 'local', binary });
     await node.pty.close(terminalSession);
     node.disconnect();
     page = await launch();
