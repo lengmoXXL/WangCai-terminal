@@ -8,8 +8,7 @@ const { createWorkspace, launchApp, testEnv, waitForShell, wangcaiApp, writeInit
 
 /** The checkout next to this repository, which these tests drive. */
 const app = wangcaiApp();
-// The SDK the app itself runs: the published one is only what this plugin compiles its types against.
-const { openMachine } = require(join(app, 'sdk/dist/index.cjs'));
+const { openMachine } = require('@lengmoxxl/sdk');
 
 test('the terminal view opens its own shell in the sidebar, reattaches it and kills it when closed', { timeout: 180000 }, async () => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'wangcai-terminal-')));
