@@ -9,11 +9,16 @@ const { fileLocation, registerFileLinks } = compiled.exports;
 
 // A terminal the link provider can scan, with the files the plugin would answer for: everything
 // else on a line is left as plain text, which is what the filesystem decides in the app.
-function pane(terminal, existing) {
+function pane(terminal, existing, hold = () => {}) {
   let provider;
   const clicks = [];
-  registerFileLinks({ options: {}, cols: terminal.cols, buffer: terminal.buffer, registerLinkProvider(value) { provider = value; } }, {
-    resolve: async (paths) => Object.fromEntries(paths.filter(path => path in existing).map(path => [path, existing[path]])),
+  // A terminal face the plugin registers with, whose columns answer for the terminal it draws on: a
+  // resize cuts the rows again under a line the plugin already read.
+  registerFileLinks({ options: {}, get cols() { return terminal.cols; }, buffer: terminal.buffer, registerLinkProvider(value) { provider = value; } }, {
+    resolve: async (paths) => {
+      await hold();
+      return Object.fromEntries(paths.filter(path => path in existing).map(path => [path, existing[path]]));
+    },
     activate: (path, line, column) => clicks.push({ path, line, column }),
   });
   const write = (text) => new Promise(resolve => terminal.write(text, resolve));
@@ -130,4 +135,35 @@ test('punctuation printed around a path stays outside it', async () => {
   // A Chinese sentence around a name without a separator or a line is left alone.
   assert.deepEqual(await view.links(2), []);
   terminal.dispose();
+});
+
+test('a path the terminal wrapped is one link on every row, and a resize is read off the rows it has now', async () => {
+  const path = '/tmp/a-long-directory-name-0/a-long-directory-name-1/file.ts';
+  const terminal = new Terminal({ cols: 24, rows: 10, allowProposedApi: true });
+  let looks = 0;
+  const view = pane(terminal, { [path]: path }, () => { looks++; });
+  await view.write(`${path}\r\n`);
+  for (const row of [1, 2, 3]) {
+    const found = await view.links(row);
+    assert.deepEqual(found.map((link) => link.text), [path], `row ${row} of the wrapped path is a link`);
+  }
+  assert.equal(looks, 1, 'the wrapped line is looked at once, however many rows it covers');
+  const [link] = await view.links(2);
+  assert.deepEqual(link.range, { start: { x: 1, y: 1 }, end: { x: 12, y: 3 } }, 'the link covers the whole line, whichever row asks for it');
+
+  // The answer to a look lands a resize late, which is what a slow machine makes of the same line.
+  const resized = new Terminal({ cols: 24, rows: 10, allowProposedApi: true });
+  let release;
+  const held = pane(resized, { [path]: path }, () => new Promise((done) => { release = done; }));
+  await held.write(`${path}\r\n`);
+  const answered = held.links(2);
+  resized.resize(16, 10);
+  release();
+  const found = await answered;
+  // Where a character of the printed line lands once the rows are cut at 16 columns.
+  const cellOf = (character) => ({ x: (character % 16) + 1, y: Math.floor(character / 16) + 1 });
+  assert.deepEqual(found.map((link) => link.text), [path], 'the line is still a link once the rows have been cut again');
+  assert.deepEqual(found[0].range, { start: cellOf(0), end: cellOf(path.length - 1) }, 'the link covers the rows the path has now');
+  terminal.dispose();
+  resized.dispose();
 });

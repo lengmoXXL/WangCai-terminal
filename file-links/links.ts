@@ -114,7 +114,8 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
 
   // What a line was told about its paths, and the look that is on its way. xterm asks for a line
   // again whenever it changes or the pointer returns to it, and answering that from here is what
-  // keeps the underline of a line still.
+  // keeps the underline of a line still. A line the terminal wrapped is asked for from every row it
+  // covers, so it is remembered by what its rows say together, not by where the wrap put them.
   const known = new Map<string, Record<string, string>>();
   const pending = new Map<string, Promise<Record<string, string>>>();
   let knownUntil = 0;
@@ -137,16 +138,17 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
     provideLinks(y, callback) {
       const found = candidates(term, y);
       if (!found.length) return callback([]);
-      const text = rowText(term, y);
+      const text = lineText(term, y);
       if (Date.now() > knownUntil) {
         known.clear();
         knownUntil = Date.now() + cacheTtl;
       }
       const remembered = known.get(text);
       const answer = (resolved: Record<string, string>) => {
-        // The line may have been rewritten while the answer was on its way.
-        if (rowText(term, y) !== text) return callback([]);
-        callback(found
+        // The line may have been rewritten, or rewrapped by a resize, while the answer was on its
+        // way. The answer says which paths exist; where they are is read off the buffer now.
+        if (lineText(term, y) !== text) return callback([]);
+        callback(candidates(term, y)
           .filter(candidate => resolved[candidate.path])
           .map(candidate => ({
             range: candidate.range,
@@ -163,10 +165,19 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
   });
 }
 
-// What one row holds, which is what a line is remembered by. Joining a wrapped line is what
-// computeLink does, so a row on its own is enough to tell two lines apart.
-function rowText(term: Terminal, y: number) {
-  return term.buffer.active.getLine(y - 1)?.translateToString(true) ?? '';
+// What a wrapped line says: the rows it covers joined, the way computeLink joins them to match
+// against.
+function lineText(term: Terminal, y: number) {
+  const buffer = term.buffer.active;
+  let first = y - 1;
+  while (first > 0 && buffer.getLine(first)?.isWrapped) first--;
+  let text = '';
+  for (let at = first; ; at++) {
+    const line = buffer.getLine(at);
+    if (!line) return text;
+    text += line.translateToString(true).substring(0, term.cols);
+    if (!buffer.getLine(at + 1)?.isWrapped) return text;
+  }
 }
 
 // Every path the line holds, and every name in it that looks like a file. The plugin answers which
