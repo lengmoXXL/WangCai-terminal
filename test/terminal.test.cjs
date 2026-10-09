@@ -110,3 +110,40 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('what a program in the terminal copies reaches the system clipboard', { timeout: 180000 }, async () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'wangcai-terminal-')));
+  const env = testEnv(home);
+  const panel = '.sidebar-panel[data-plugin=terminal]:visible';
+  const text = 'OSC52_COPY_ME';
+  // What a program copies with: an OSC 52 sequence, which the shell prints for it here.
+  const sequence = `\\033]52;c;${Buffer.from(text).toString('base64')}\\007`;
+  let desktop;
+  let page;
+  const copied = async () => (await page.evaluate(() => navigator.clipboard.readText())) === text;
+  try {
+    writeInit(home);
+    desktop = await launchApp(home, env);
+    page = await desktop.firstWindow();
+    await waitForShell(page);
+    await createWorkspace(page);
+    if (!await page.locator('.sidebar-right').isVisible()) await page.getByRole('button', { name: '切换右侧栏' }).click();
+    await page.getByRole('button', { name: '新建侧栏标签页' }).click();
+    await page.locator('#view-menu').getByRole('button', { name: '终端', exact: true }).click();
+    await page.locator(panel).waitFor();
+    // The clipboard is the machine's, so it is told apart from what the same test copied before.
+    await page.evaluate(() => navigator.clipboard.writeText('not copied yet'));
+    // The pane drops input until its shell is attached, so the sequence is printed until it lands.
+    for (let attempt = 0; attempt < 30 && !await copied(); attempt++) {
+      await page.locator(`${panel} .xterm-helper-textarea`).click();
+      await page.keyboard.type(`printf '${sequence}'`);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(200);
+    }
+    assert.ok(await copied(), 'the clipboard never took what the program copied');
+  } finally {
+    await desktop?.close();
+    try { execFileSync(join(app, 'wangcaicli/dist/debug/wangcai'), ['server', 'stop'], { env, stdio: 'ignore', timeout: 15000 }); } catch {}
+    rmSync(home, { recursive: true, force: true });
+  }
+});

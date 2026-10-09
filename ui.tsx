@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Terminal } from '@xterm/xterm';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { FitAddon } from '@xterm/addon-fit';
 import type { TerminalEvent, WorkspaceActive } from '@lengmoxxl/sdk';
 import type { TabRecord, UiContext } from '@lengmoxxl/sdk/channel';
@@ -30,6 +31,8 @@ function TerminalPane({ context, sessionId, activation }: { context: UiContext; 
     });
     const addon = new FitAddon();
     term.loadAddon(addon);
+    // What a program in the terminal copies goes to the system clipboard: OSC 52.
+    term.loadAddon(new ClipboardAddon());
     term.open(element.current!);
     const links = registerFileLinks(term, {
       resolve: (paths) => context.ui.request('resolve', { sessionId, paths }),
