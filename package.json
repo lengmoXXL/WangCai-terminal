@@ -5,6 +5,7 @@
   "dependencies": {
     "@xterm/addon-clipboard": "^0.2.0",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -16,7 +17,7 @@
     "typecheck": "tsc"
   },
   "devDependencies": {
-    "@lengmoxxl/sdk": "^0.1.1",
+    "@lengmoxxl/sdk": "^0.1.3",
     "@types/node": "^24.19.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

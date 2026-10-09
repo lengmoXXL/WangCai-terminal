@@ -147,3 +147,82 @@ test('what a program in the terminal copies reaches the system clipboard', { tim
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('a printed web address is a link the app opens in a browser', { timeout: 180000 }, async () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'wangcai-terminal-')));
+  const env = testEnv(home);
+  const panel = '.sidebar-panel[data-plugin=terminal]:visible';
+  const dom = '.sidebar-panel[data-plugin=terminal]';
+  // An address longer than the pane is wide, so it prints across a wrap.
+  const address = `https://example.com/${'a-very-long-address-segment/'.repeat(7)}page.html`;
+  let desktop;
+  let page;
+  const underlined = () => page.evaluate((dom) => [...document.querySelectorAll(`${dom} .xterm-rows > div`)].map((row) => [...row.querySelectorAll('span')].filter((span) => span.style.textDecoration === 'underline').map((span) => span.textContent).join('')), dom);
+  // The point one character of a row sits at, which is where a pointer goes to touch that cell.
+  const point = (row, at) => page.evaluate(({ dom, row, at }) => {
+    const element = document.querySelectorAll(`${dom} .xterm-rows > div`)[row];
+    let skip = at;
+    for (const span of element.querySelectorAll('span')) {
+      if (skip >= span.firstChild.length) { skip -= span.firstChild.length; continue; }
+      const range = document.createRange();
+      range.setStart(span.firstChild, skip);
+      range.setEnd(span.firstChild, skip + 1);
+      const rect = range.getBoundingClientRect();
+      return [rect.left + rect.width / 2, rect.top + rect.height / 2];
+    }
+    throw new Error(`row ${row} is shorter than ${at + 1} characters`);
+  }, { dom, row, at });
+  try {
+    writeInit(home);
+    desktop = await launchApp(home, env);
+    // The window hands a link to the system browser: the test takes that call instead.
+    await desktop.evaluate(({ ipcMain }) => { ipcMain.removeHandler('wangcai:open'); ipcMain.handle('wangcai:open', (_event, url) => { globalThis.opened = url; }); });
+    page = await desktop.firstWindow();
+    await waitForShell(page);
+    await createWorkspace(page);
+    if (!await page.locator('.sidebar-right').isVisible()) await page.getByRole('button', { name: '切换右侧栏' }).click();
+    await page.getByRole('button', { name: '新建侧栏标签页' }).click();
+    await page.locator('#view-menu').getByRole('button', { name: '终端', exact: true }).click();
+    await page.locator(panel).waitFor();
+    // The pane drops input until its shell is attached, so the address is printed until it shows.
+    for (let attempt = 0; attempt < 30 && !(await page.locator(`${panel} .xterm-rows`).textContent()).includes(address.slice(-12)); attempt++) {
+      await page.locator(`${panel} .xterm-helper-textarea`).click();
+      await page.keyboard.type(`clear; stty -echo; printf '%s\\n' '${address}'`);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(200);
+    }
+    const printed = await page.evaluate((dom) => [...document.querySelectorAll(`${dom} .xterm-rows > div`)].map((row) => row.textContent), dom);
+    const last = printed.findLastIndex((row) => row.includes(address.slice(-16)));
+    assert.notEqual(last, -1, `no row holds the end of the address: ${JSON.stringify(printed)}`);
+    let first = last;
+    while (first > 0 && printed[first - 1] && address.includes(printed[first - 1])) first--;
+    assert.ok(last > first, 'the printed address wraps');
+
+    const covered = Array.from({ length: last - first + 1 }, (_, at) => first + at);
+    // The pointer finds the address as a link on every row the wrap put it on.
+    for (const row of covered) {
+      const [x, y] = await point(row, 1);
+      await page.mouse.move(0, 0);
+      await page.mouse.move(x, y);
+      await page.waitForFunction((rows) => {
+        const links = [...document.querySelectorAll('.sidebar-panel[data-plugin=terminal] .xterm-rows > div')].map((row) => [...row.querySelectorAll('span')].some((span) => span.style.textDecoration === 'underline'));
+        return rows.every((at) => links[at]);
+      }, covered);
+    }
+    assert.deepEqual((await underlined()).map((text, row) => (text ? row : -1)).filter((row) => row >= 0), covered, 'the address is one link on every row it covers');
+    assert.equal((await underlined()).join(''), address, 'the link is the whole address');
+
+    const [x, y] = await point(first, 1);
+    await page.mouse.click(x, y);
+    let opened;
+    for (let attempt = 0; attempt < 50 && !opened; attempt++) {
+      opened = await desktop.evaluate(() => globalThis.opened);
+      if (!opened) await page.waitForTimeout(100);
+    }
+    assert.equal(opened, address, 'the app is handed the address');
+  } finally {
+    await desktop?.close();
+    try { execFileSync(join(app, 'wangcaicli/dist/debug/wangcai'), ['server', 'stop'], { env, stdio: 'ignore', timeout: 15000 }); } catch {}
+    rmSync(home, { recursive: true, force: true });
+  }
+});
