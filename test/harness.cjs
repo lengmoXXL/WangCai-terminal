@@ -54,18 +54,14 @@ exports.waitForShell = (page) => page.locator('.workspaces').waitFor();
 /** A right-click on the workspace heading opens the menu of machines a workspace can be opened on. */
 const openWorkspaceMenu = (page) => page.locator('.workspace-header').click({ button: 'right' });
 
-/** Waits until the workspace in front has a terminal that takes input; a session id alone is not enough. */
+/** Waits until the workspace in front has a terminal on screen: the pane draws the shell once it attaches. */
 const waitForTerminal = async (page) => {
-  const id = await page.evaluate(async () => {
-    const config = await window.wangcai.request('terminal-agent', 'config');
-    return config.workspaces.find((workspace) => workspace.id === config.active)?.sessionId;
-  });
   for (let attempt = 0; attempt < 400; attempt++) {
-    const attached = await page.evaluate((session) => window.wangcai.request('terminal-agent', 'pty', { op: 'input', sessionId: session, params: { data: '' } }).then(() => true, () => false), id);
-    if (attached) return;
+    const drawn = await page.evaluate(() => (document.querySelector('.terminal-pane.active .xterm-rows')?.textContent ?? '').trim().length > 0);
+    if (drawn) return;
     await page.waitForTimeout(50);
   }
-  throw new Error('the terminal never attached');
+  throw new Error('the pane never drew the shell');
 };
 
 /** The list menu offers one entry per machine; picking the local one opens a workspace on it. */

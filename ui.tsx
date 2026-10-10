@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { FitAddon } from '@xterm/addon-fit';
-import type { TerminalEvent, WorkspaceActive } from '@lengmoxxl/sdk';
+import type { WorkspaceActive } from '@lengmoxxl/sdk';
 import type { TabRecord, UiContext } from '@lengmoxxl/sdk/channel';
 import { registerFileLinks } from './file-links/links';
 import type { Settings, TerminalRef } from './shared';
@@ -45,47 +45,64 @@ function TerminalPane({ context, sessionId, activation }: { context: UiContext; 
     let alive = true;
     let replaying = false;
     let ready = false;
-    const sendSize = () => {
-      if (!alive || !ready || replaying) return;
-      void context.ui.request('pty', { op: 'resize', sessionId, params: { rows: term.rows, cols: term.cols } }).catch((error: Error) => { if (alive) setError(error.message); });
+    let socket: WebSocket | undefined;
+    const send = (op: string, params: Record<string, unknown> = {}) => {
+      socket!.send(JSON.stringify({ op, session_id: sessionId, ...params }));
     };
-    const unsubscribe = context.ui.subscribe<TerminalEvent>('terminal', (event) => {
-      if (!alive || event.session_id !== sessionId) return;
-      if (event.event === 'snapshot') {
-        replaying = true;
-        term.reset();
-        term.resize(event.cols, event.rows);
-        term.write(event.data, () => {
-          if (!alive) return;
-          replaying = false;
-          if (!element.current?.offsetWidth) return;
-          addon.fit();
-          sendSize();
-        });
-      } else {
-        term.write(event.data);
-      }
-    });
+    const sendSize = () => {
+      if (!ready || replaying) return;
+      send('resize', { rows: term.rows, cols: term.cols });
+    };
+    void context.ui.request<string>('address', sessionId).then((url) => {
+      if (!alive) return;
+      socket = new WebSocket(url);
+      // Chromium hands binary frames over as blobs unless it is told otherwise.
+      socket.binaryType = 'arraybuffer';
+      socket.onopen = () => send('attach');
+      const decoder = new TextDecoder();
+      socket.onmessage = ({ data }) => {
+        if (!alive) return;
+        if (typeof data === 'string') {
+          const reply = JSON.parse(data);
+          if (reply.error) setError(reply.error);
+          return;
+        }
+        const bytes = new Uint8Array(data);
+        const length = new DataView(data).getUint32(0);
+        const event = JSON.parse(decoder.decode(bytes.subarray(4, 4 + length))) as { event: string; rows: number; cols: number };
+        const payload = bytes.subarray(4 + length);
+        if (event.event === 'snapshot') {
+          replaying = true;
+          ready = true;
+          term.reset();
+          term.resize(event.cols, event.rows);
+          term.write(payload, () => {
+            if (!alive) return;
+            replaying = false;
+            if (!element.current?.offsetWidth) return;
+            addon.fit();
+            sendSize();
+          });
+          return;
+        }
+        term.write(payload);
+      };
+      socket.onclose = () => { if (alive) setError('终端连接已断开'); };
+    }).catch((error: Error) => { if (alive) setError(error.message); });
     const input = term.onData((data) => {
       if (!ready || replaying) return;
-      void context.ui.request('pty', { op: 'input', sessionId, params: { data } }).catch((error: Error) => { if (alive) setError(error.message); });
+      send('input', { data });
     });
     const resize = term.onResize(sendSize);
     const observer = new ResizeObserver(() => {
       if (!replaying && element.current?.offsetWidth && element.current?.offsetHeight) addon.fit();
     });
     observer.observe(element.current!);
-    void context.ui.request('attach', sessionId).then(() => {
-      if (!alive) return;
-      ready = true;
-      sendSize();
-    }).catch((error: Error) => { if (alive) setError(error.message); });
     return () => {
       alive = false;
-      unsubscribe(); input.dispose(); resize.dispose(); observer.disconnect();
-      links.dispose(); term.dispose();
+      input.dispose(); resize.dispose(); observer.disconnect();
+      links.dispose(); socket?.close(); term.dispose();
       terminal.current = null;
-      void context.ui.request('pty', { op: 'detach', sessionId }).catch(() => {});
     };
   }, [context, sessionId]);
 
