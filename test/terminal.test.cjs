@@ -10,6 +10,23 @@ const { createWorkspace, launchApp, testEnv, waitForShell, wangcaiApp, writeInit
 const app = wangcaiApp();
 const { openMachine } = require('@lengmoxxl/sdk');
 
+// A pane drops input while it is between attachments, so retry until the shell answers.
+const typeUntil = async (page, textarea, command, observed) => {
+  for (let attempt = 0; attempt < 30 && !await observed(); attempt++) {
+    await page.locator(textarea).click();
+    await page.keyboard.type(command);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+  }
+  assert.ok(await observed(), `the shell never answered: ${command}`);
+};
+
+const openView = async (page, name) => {
+  if (!await page.locator('.sidebar-right').isVisible()) await page.getByRole('button', { name: '切换右侧栏' }).click();
+  await page.getByRole('button', { name: '新建侧栏标签页' }).click();
+  await page.locator('#view-menu').getByRole('button', { name, exact: true }).click();
+};
+
 test('the terminal view opens its own shell in the sidebar, reattaches it and kills it when closed', { timeout: 180000 }, async () => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'wangcai-terminal-')));
   const previousHome = process.env.HOME;
@@ -32,21 +49,6 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
     const page = await desktop.firstWindow();
     await waitForShell(page);
     return page;
-  };
-  const openView = async (page, name) => {
-    if (!await page.locator('.sidebar-right').isVisible()) await page.getByRole('button', { name: '切换右侧栏' }).click();
-    await page.getByRole('button', { name: '新建侧栏标签页' }).click();
-    await page.locator('#view-menu').getByRole('button', { name, exact: true }).click();
-  };
-  // A pane drops input while it is between attachments, so retry until the shell answers.
-  const typeUntil = async (page, textarea, command, observed) => {
-    for (let attempt = 0; attempt < 30 && !await observed(); attempt++) {
-      await page.locator(textarea).click();
-      await page.keyboard.type(command);
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(200);
-    }
-    assert.ok(await observed(), `the shell never answered: ${command}`);
   };
   try {
     writeInit(home);
@@ -120,27 +122,17 @@ test('what a program in the terminal copies reaches the system clipboard', { tim
   const sequence = `\\033]52;c;${Buffer.from(text).toString('base64')}\\007`;
   let desktop;
   let page;
-  const copied = async () => (await page.evaluate(() => navigator.clipboard.readText())) === text;
   try {
     writeInit(home);
     desktop = await launchApp(home, env);
     page = await desktop.firstWindow();
     await waitForShell(page);
     await createWorkspace(page);
-    if (!await page.locator('.sidebar-right').isVisible()) await page.getByRole('button', { name: '切换右侧栏' }).click();
-    await page.getByRole('button', { name: '新建侧栏标签页' }).click();
-    await page.locator('#view-menu').getByRole('button', { name: '终端', exact: true }).click();
+    await openView(page, '终端');
     await page.locator(panel).waitFor();
     // The clipboard is the machine's, so it is told apart from what the same test copied before.
     await page.evaluate(() => navigator.clipboard.writeText('not copied yet'));
-    // The pane drops input until its shell is attached, so the sequence is printed until it lands.
-    for (let attempt = 0; attempt < 30 && !await copied(); attempt++) {
-      await page.locator(`${panel} .xterm-helper-textarea`).click();
-      await page.keyboard.type(`printf '${sequence}'`);
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(200);
-    }
-    assert.ok(await copied(), 'the clipboard never took what the program copied');
+    await typeUntil(page, `${panel} .xterm-helper-textarea`, `printf '${sequence}'`, async () => (await page.evaluate(() => navigator.clipboard.readText())) === text);
   } finally {
     await desktop?.close();
     try { execFileSync(join(app, 'wangcaicli/dist/debug/wangcai'), ['server', 'stop'], { env, stdio: 'ignore', timeout: 15000 }); } catch {}
@@ -180,17 +172,9 @@ test('a printed web address is a link the app opens in a browser', { timeout: 18
     page = await desktop.firstWindow();
     await waitForShell(page);
     await createWorkspace(page);
-    if (!await page.locator('.sidebar-right').isVisible()) await page.getByRole('button', { name: '切换右侧栏' }).click();
-    await page.getByRole('button', { name: '新建侧栏标签页' }).click();
-    await page.locator('#view-menu').getByRole('button', { name: '终端', exact: true }).click();
+    await openView(page, '终端');
     await page.locator(panel).waitFor();
-    // The pane drops input until its shell is attached, so the address is printed until it shows.
-    for (let attempt = 0; attempt < 30 && !(await page.locator(`${panel} .xterm-rows`).textContent()).includes(address.slice(-12)); attempt++) {
-      await page.locator(`${panel} .xterm-helper-textarea`).click();
-      await page.keyboard.type(`clear; stty -echo; printf '%s\\n' '${address}'`);
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(200);
-    }
+    await typeUntil(page, `${panel} .xterm-helper-textarea`, `clear; stty -echo; printf '%s\\n' '${address}'`, async () => (await page.locator(`${panel} .xterm-rows`).textContent()).includes(address.slice(-12)));
     const printed = await page.evaluate((dom) => [...document.querySelectorAll(`${dom} .xterm-rows > div`)].map((row) => row.textContent), dom);
     const last = printed.findLastIndex((row) => row.includes(address.slice(-16)));
     assert.notEqual(last, -1, `no row holds the end of the address: ${JSON.stringify(printed)}`);
@@ -220,6 +204,42 @@ test('a printed web address is a link the app opens in a browser', { timeout: 18
       if (!opened) await page.waitForTimeout(100);
     }
     assert.equal(opened, address, 'the app is handed the address');
+  } finally {
+    await desktop?.close();
+    try { execFileSync(join(app, 'wangcaicli/dist/debug/wangcai'), ['server', 'stop'], { env, stdio: 'ignore', timeout: 15000 }); } catch {}
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a pane attaches again when the socket to the node drops', { timeout: 180000 }, async () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'wangcai-terminal-')));
+  const env = testEnv(home);
+  const panel = '.sidebar-panel[data-plugin=terminal]:visible';
+  let desktop;
+  let page;
+  try {
+    writeInit(home);
+    desktop = await launchApp(home, env);
+    page = await desktop.firstWindow();
+    await waitForShell(page);
+    await createWorkspace(page);
+    // A slept laptop or a dropped tunnel takes the pane's own socket with it, so the test holds the
+    // sockets the pane opens and closes the one it is reading from.
+    await page.evaluate(() => {
+      const Native = window.WebSocket;
+      window.__sockets = [];
+      window.WebSocket = class extends Native {
+        constructor(url) { super(url); window.__sockets.push(this); }
+      };
+    });
+    await openView(page, '终端');
+    await page.locator(panel).waitFor();
+    await typeUntil(page, `${panel} .xterm-helper-textarea`, "printf 'BEFORE_DROP_%s\\n' ok", async () => (await page.locator(`${panel} .xterm-rows`).textContent()).includes('BEFORE_DROP_ok'));
+    assert.equal(await page.evaluate(() => window.__sockets.length), 1, 'the pane reads from a socket of its own');
+    await page.evaluate(() => window.__sockets.at(-1).close());
+    await page.waitForFunction(() => window.__sockets.length === 2);
+    await typeUntil(page, `${panel} .xterm-helper-textarea`, "printf 'AFTER_DROP_%s\\n' ok", async () => (await page.locator(`${panel} .xterm-rows`).textContent()).includes('AFTER_DROP_ok'));
+    assert.equal(await page.locator(`${panel} .terminal-message.error`).count(), 0, 'a recovered pane says nothing about the drop');
   } finally {
     await desktop?.close();
     try { execFileSync(join(app, 'wangcaicli/dist/debug/wangcai'), ['server', 'stop'], { env, stdio: 'ignore', timeout: 15000 }); } catch {}
