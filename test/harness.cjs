@@ -67,7 +67,7 @@ const waitForTerminal = async (page) => {
 /** The list menu offers one entry per machine; picking the local one opens a workspace on it. */
 exports.createWorkspace = async (page) => {
   await openWorkspaceMenu(page);
-  await page.locator('#workspace-row-menu').getByRole('menuitem', { name: '本机', exact: true }).click();
+  await page.locator('#workspace-row-menu').getByRole('menuitem', { name: '新建 本机', exact: true }).click();
   await page.locator('.terminal-pane.active .xterm-helper-textarea').waitFor();
   await waitForTerminal(page);
 };
