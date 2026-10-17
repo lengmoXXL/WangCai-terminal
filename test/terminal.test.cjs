@@ -196,7 +196,9 @@ test('a printed web address is a link the app opens in a browser', { timeout: 18
     assert.deepEqual((await underlined()).map((text, row) => (text ? row : -1)).filter((row) => row >= 0), covered, 'the address is one link on every row it covers');
     assert.equal((await underlined()).join(''), address, 'the link is the whole address');
 
+    // The click that holds Command is what opens the address.
     const [x, y] = await point(first, 1);
+    await page.keyboard.down('Meta');
     await page.mouse.click(x, y);
     let opened;
     for (let attempt = 0; attempt < 50 && !opened; attempt++) {
@@ -204,6 +206,12 @@ test('a printed web address is a link the app opens in a browser', { timeout: 18
       if (!opened) await page.waitForTimeout(100);
     }
     assert.equal(opened, address, 'the app is handed the address');
+
+    await page.keyboard.up('Meta');
+    await desktop.evaluate(() => { globalThis.opened = undefined; });
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(500);
+    assert.equal(await desktop.evaluate(() => globalThis.opened), undefined, 'a click that holds no Command opens nothing');
   } finally {
     await desktop?.close();
     try { execFileSync(join(app, 'wangcaicli/dist/debug/wangcai'), ['server', 'stop'], { env, stdio: 'ignore', timeout: 15000 }); } catch {}

@@ -1,5 +1,5 @@
 import { computeLink } from 'xterm-link-provider';
-import type { IBufferCellPosition, IBufferRange, Terminal } from '@xterm/xterm';
+import type { IBufferCellPosition, IBufferRange, ILink, Terminal } from '@xterm/xterm';
 import type { FileClick } from '@lengmoxxl/sdk';
 
 type FileLocation = Pick<FileClick, 'path' | 'line' | 'column'>;
@@ -106,10 +106,23 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
   // An OSC 8 link hands over its target as text, which is read the same way a printed one is.
   term.options.linkHandler = {
     allowNonHttpProtocols: true,
-    activate: (_, text) => {
+    // A link opens on the click that holds Command: without it the click stays a click in the shell.
+    activate: (event, text) => {
+      if (!event.metaKey) return;
       const location = fileLocation(text);
       if (location) files.activate(location.path, location.line, location.column);
     },
+  };
+
+  // What Command shows: a link hands xterm the two decorations it draws with, so a line read while
+  // the key is held is underlined and pointed at.
+  let command = false;
+  let hovered: ILink | undefined;
+  const setCommand = (held: boolean) => {
+    command = held;
+    if (!hovered?.decorations) return;
+    hovered.decorations.underline = held;
+    hovered.decorations.pointerCursor = held;
   };
 
   // What a line was told about its paths, and the look that is on its way. xterm asks for a line
@@ -134,7 +147,7 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
     return look;
   };
 
-  return term.registerLinkProvider({
+  const provider = term.registerLinkProvider({
     provideLinks(y, callback) {
       const found = candidates(term, y);
       if (!found.length) return callback([]);
@@ -150,11 +163,21 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
         if (lineText(term, y) !== text) return callback([]);
         callback(candidates(term, y)
           .filter(candidate => resolved[candidate.path])
-          .map(candidate => ({
-            range: candidate.range,
-            text: candidate.text,
-            activate: () => files.activate(resolved[candidate.path], candidate.line, candidate.column),
-          })));
+          .map(candidate => {
+            // The link under the pointer is the one a key that changes has to reach, so it says
+            // where it is: xterm tells it when the pointer arrives and when it leaves.
+            const link: ILink = {
+              range: candidate.range,
+              text: candidate.text,
+              decorations: { underline: command, pointerCursor: command },
+              hover: () => { hovered = link; },
+              leave: () => { if (hovered === link) hovered = undefined; },
+              activate: (event: MouseEvent) => {
+                if (event.metaKey) files.activate(resolved[candidate.path], candidate.line, candidate.column);
+              },
+            };
+            return link;
+          }));
       };
       if (remembered) return answer(remembered);
       const paths = [...new Set(found.map(candidate => candidate.path))]
@@ -163,6 +186,10 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
       void ask(text, paths).then(answer);
     },
   });
+  return {
+    setCommand,
+    dispose: () => provider.dispose(),
+  };
 }
 
 // What a wrapped line says: the rows it covers joined, the way computeLink joins them to match

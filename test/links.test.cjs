@@ -14,7 +14,7 @@ function pane(terminal, existing, hold = () => {}) {
   const clicks = [];
   // A terminal face the plugin registers with, whose columns answer for the terminal it draws on: a
   // resize cuts the rows again under a line the plugin already read.
-  registerFileLinks({ options: {}, get cols() { return terminal.cols; }, buffer: terminal.buffer, registerLinkProvider(value) { provider = value; } }, {
+  const handle = registerFileLinks({ options: {}, get cols() { return terminal.cols; }, buffer: terminal.buffer, registerLinkProvider(value) { provider = value; } }, {
     resolve: async (paths) => {
       await hold();
       return Object.fromEntries(paths.filter(path => path in existing).map(path => [path, existing[path]]));
@@ -22,7 +22,7 @@ function pane(terminal, existing, hold = () => {}) {
     activate: (path, line, column) => clicks.push({ path, line, column }),
   });
   const write = (text) => new Promise(resolve => terminal.write(text, resolve));
-  return { write, clicks, links: (y) => new Promise(resolve => provider.provideLinks(y, resolve)) };
+  return { write, clicks, setCommand: handle.setCommand, links: (y) => new Promise(resolve => provider.provideLinks(y, resolve)) };
 }
 
 test('file links: absolute paths, file URLs, line/column and wrapped Unicode cells', async () => {
@@ -43,12 +43,22 @@ test('file links: absolute paths, file URLs, line/column and wrapped Unicode cel
   await view.write('中文 /tmp/long-directory/file.ts:42:8\r\nhttps://example.com/a.ts');
   const links = await view.links(2);
   assert.equal(links.length, 1);
-  // The location is underlined, and the click opens the path the plugin resolved.
   assert.equal(links[0].text, '/tmp/long-directory/file.ts:42:8');
   assert.deepEqual(links[0].range.start, { x: 6, y: 1 });
   assert.equal(links[0].range.end.y, 2);
-  links[0].activate();
+  // The click opens the path the plugin resolved once it holds Command: on its own it opens nothing.
+  links[0].activate({ metaKey: false });
+  assert.deepEqual(view.clicks, []);
+  links[0].activate({ metaKey: true });
   assert.deepEqual(view.clicks, [{ path: '/tmp/long-directory/file.ts', line: 42, column: 8 }]);
+
+  assert.deepEqual(links[0].decorations, { underline: false, pointerCursor: false }, 'a link waits for Command');
+  links[0].hover();
+  view.setCommand(true);
+  assert.deepEqual(links[0].decorations, { underline: true, pointerCursor: true }, 'the key shows the link under the pointer');
+  assert.deepEqual((await view.links(2))[0].decorations, { underline: true, pointerCursor: true }, 'and a line read while it is held');
+  view.setCommand(false);
+  assert.deepEqual(links[0].decorations, { underline: false, pointerCursor: false }, 'releasing it hides the link again');
   assert.deepEqual(await view.links(3), []);
   await view.write('\r\n./main.rs ../README.md Makefile');
   const relative = await view.links(4);
@@ -109,7 +119,7 @@ test('only the paths that exist become links, a lone file name included', async 
   // A file name of its own is a link only while it exists, and it keeps the line it printed.
   const names = await view.links(2);
   assert.deepEqual(names.map(link => link.text), ['sample.ts:12', 'sample.ts']);
-  names[0].activate();
+  names[0].activate({ metaKey: true });
   assert.deepEqual(view.clicks, [{ path: '/work/sample.ts', line: 12, column: undefined }]);
   assert.deepEqual(await view.links(3), []);
   // A name a build tool prints is the wider reading of `INSTALL.md`, so its click opens the whole
@@ -117,7 +127,7 @@ test('only the paths that exist become links, a lone file name included', async 
   // shorter name exists as a file of its own.
   const build = await view.links(4);
   assert.deepEqual(build.map(link => link.text), ['INSTALL', 'INSTALL.md']);
-  build[1].activate();
+  build[1].activate({ metaKey: true });
   assert.deepEqual(view.clicks.at(-1), { path: '/work/INSTALL.md', line: undefined, column: undefined });
   terminal.dispose();
 });

@@ -6,6 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { FitAddon } from '@xterm/addon-fit';
 import type { WorkspaceActive } from '@lengmoxxl/sdk';
 import type { TabRecord, UiContext } from '@lengmoxxl/sdk/channel';
+import { trackCommand } from './command';
 import { registerFileLinks } from './file-links/links';
 import type { Settings, TerminalRef } from './shared';
 import '@xterm/xterm/css/xterm.css';
@@ -34,13 +35,18 @@ function TerminalPane({ context, sessionId, activation }: { context: UiContext; 
     term.loadAddon(addon);
     // What a program in the terminal copies goes to the system clipboard: OSC 52.
     term.loadAddon(new ClipboardAddon());
-    // What the terminal prints as a web address is a link the app opens in a browser.
-    term.loadAddon(new WebLinksAddon((_event, uri) => { void context.host.open(uri).catch((error: Error) => setError(error.message)); }));
+    // What the terminal prints as a web address is a link the app opens in a browser, on the click
+    // that holds Command: on its own the click stays a click in the terminal.
+    term.loadAddon(new WebLinksAddon((event, uri) => {
+      if (event.metaKey) void context.host.open(uri).catch((error: Error) => setError(error.message));
+    }));
     term.open(element.current!);
     const links = registerFileLinks(term, {
       resolve: (paths) => context.ui.request('resolve', { sessionId, paths }),
       activate: (path, line, column) => { void context.ui.request('click', { sessionId, location: { path, line, column } }).catch((error: Error) => setError(error.message)); },
     });
+    // Command is what shows a link, and what the click on it opens with.
+    const command = trackCommand(term.element!, links.setCommand);
     terminal.current = term;
     let alive = true;
     let replaying = false;
@@ -118,7 +124,7 @@ function TerminalPane({ context, sessionId, activation }: { context: UiContext; 
       alive = false;
       clearTimeout(retry);
       input.dispose(); resize.dispose(); observer.disconnect();
-      links.dispose(); socket?.close(); term.dispose();
+      command.dispose(); links.dispose(); socket?.close(); term.dispose();
       terminal.current = null;
     };
   }, [context, sessionId]);
