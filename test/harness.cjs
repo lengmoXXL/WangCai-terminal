@@ -2,12 +2,13 @@ const { existsSync, mkdirSync, writeFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 
 /**
- * The WangCai checkout next to this repository, which runs this plugin. It has to be built: the app
- * launches in place and loads this plugin's files from this directory. A missing one is an error
- * rather than a skip, because every test here drives the app.
+ * The WangCai checkout next to this repository, which runs this plugin, or the one WANGCAI_CHECKOUT names:
+ * a worktree, for trying this plugin against a branch of the app. It has to be built: the app launches in
+ * place and loads this plugin's files from this directory. A missing one is an error rather than a skip,
+ * because every test here drives the app.
  */
 exports.wangcaiApp = () => {
-  const root = resolve(__dirname, '../../WangCai');
+  const root = resolve(__dirname, process.env.WANGCAI_CHECKOUT ?? '../../WangCai');
   const built = ['desktop/dist/main/index.js', 'desktop/node/bin/node', 'wangcaicli/dist/debug/wangcai'];
   if (!built.every((name) => existsSync(join(root, name)))) throw new Error('build the WangCai checkout next to this repository');
   return root;

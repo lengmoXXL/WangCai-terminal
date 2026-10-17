@@ -67,7 +67,7 @@ export async function activate(context: MainContext) {
 
   handlers.push(context.ui.handle('open', async ({ machine, sessionId }: WorkspaceActive) => {
     const node = await connection(machine);
-    const session = await node.pty.create({ rows: 24, cols: 80 }, await node.pty.cwd(sessionId));
+    const session = await node.pty.create({ rows: 24, cols: 80 }, { cwd: await node.pty.cwd(sessionId) });
     sessions[session.id] = machine;
     save();
     return ref(machine, session.id);
