@@ -17,7 +17,7 @@ export const title = '终端';
 let profile: Settings;
 let activeTerminal: WorkspaceActive | null = null;
 
-function TerminalPane({ context, sessionId, activation }: { context: UiContext; sessionId: string; activation: number }) {
+function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: string }) {
   const element = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal>(null);
   const [error, setError] = useState('');
@@ -129,10 +129,6 @@ function TerminalPane({ context, sessionId, activation }: { context: UiContext; 
     };
   }, [context, sessionId]);
 
-  useEffect(() => {
-    requestAnimationFrame(() => terminal.current?.focus());
-  }, [activation]);
-
   return <div className="terminal-pane">
     <div className="terminal-surface" ref={element} />
     {error && <div className="terminal-message error" role="alert">{error}</div>}
@@ -147,9 +143,9 @@ function openTab(context: UiContext, tab: TerminalRef & { workspaceId?: string }
       container.classList.add('wangcai-terminal');
       container.style.fontFamily = profile.font.family;
       const root = createRoot(container);
-      let activation = 0;
       return {
-        onSelect: () => { root.render(<TerminalPane context={context} sessionId={tab.sessionId} activation={++activation} />); },
+        // A tab redrawn because the app's list changed is not a selection, so only a click on the pane takes the focus.
+        onSelect: () => { root.render(<TerminalPane context={context} sessionId={tab.sessionId} />); },
         dispose: () => root.unmount(),
       };
     },
