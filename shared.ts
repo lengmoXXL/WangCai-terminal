@@ -5,4 +5,5 @@ export type { Machine };
 export type Font = { family: string; size: number; lineHeight: number };
 export type Settings = Profile & { font: Font };
 
-export interface TerminalRef { machine: Machine; sessionId: string; label: string }
+// `title` is what the session is shown under, `location` where its shell sits.
+export interface TerminalRef { machine: Machine; sessionId: string; title: string; location: string }

@@ -137,7 +137,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
 
 function openTab(context: UiContext, tab: TerminalRef & { workspaceId?: string }) {
   context.host.tabs({
-    id: tab.sessionId, title: tab.label, tooltip: `${tab.machine.name}: ${tab.label}`, workspaceId: tab.workspaceId,
+    id: tab.sessionId, title: tab.title, tooltip: `${tab.machine.name}: ${tab.location}`, workspaceId: tab.workspaceId,
     onClose: () => { void context.ui.request('close', tab.sessionId).catch(() => {}); },
     mount(container: HTMLElement) {
       container.classList.add('wangcai-terminal');
