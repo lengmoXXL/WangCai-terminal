@@ -1,4 +1,4 @@
-const { existsSync, mkdirSync, writeFileSync } = require('node:fs');
+const { cpSync, existsSync, mkdirSync, writeFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 
 /**
@@ -18,14 +18,35 @@ exports.wangcaiApp = () => {
 exports.testEnv = (home) => {
   const env = { ...process.env, HOME: home, WANGCAI_HOME: '', SHELL: '/bin/bash', ELECTRON_RENDERER_URL: '' };
   delete env.ELECTRON_RUN_AS_NODE;
+  // The agent a Core would download is taken from this checkout instead, so a case needs no network for it.
+  env.WANGCAI_AGENT_SOURCE = join(exports.wangcaiApp(), 'wangcaicli/dist/debug/wangcai');
   return env;
 };
 
-/** Launches that checkout on this home, with the Electron the checkout depends on. */
+/**
+ * Puts a Core where the app would have installed one: the checkout next to this repository, or the one
+ * WANGCAI_CORE_SOURCE names. A home without one opens the window that installs a Core first, and cloning and
+ * building one per case is the slowest thing a case here could wait for.
+ */
+const installCore = (home) => {
+  const storage = join(home, '.local/share/wangcai');
+  // A case launches the same home more than once, and the app skips a Core it already has: copy it once too.
+  if (existsSync(join(storage, 'core/main.cjs'))) return;
+  const source = resolve(__dirname, process.env.WANGCAI_CORE_SOURCE ?? '../../WangCai-Core');
+  if (!existsSync(join(source, 'dist/main.cjs'))) throw new Error(`build the Core checkout at ${source}`);
+  mkdirSync(storage, { recursive: true });
+  cpSync(join(source, 'dist'), join(storage, 'core'), { recursive: true });
+  // What a Core reads of its own sources: the snapshot an agent is set up from.
+  for (const entry of ['main', 'ui']) cpSync(join(source, entry), join(storage, 'core-src', entry), { recursive: true });
+};
+
+/** Launches that checkout on this home, with a Core already in place and the Electron the checkout depends on.
+ *  The window it draws never comes to the front, so driving it does not take the focus of whoever works there. */
 exports.launchApp = (home, env) => {
   const app = exports.wangcaiApp();
   const { _electron: electron } = require(join(app, 'node_modules/playwright'));
-  return electron.launch({ executablePath: require(join(app, 'node_modules/electron')), args: [join(app, 'desktop'), `--user-data-dir=${join(home, 'electron')}`], cwd: app, env });
+  installCore(home);
+  return electron.launch({ executablePath: require(join(app, 'node_modules/electron')), args: [join(app, 'desktop'), '--unfocused', `--user-data-dir=${join(home, 'electron')}`], cwd: app, env });
 };
 
 /** A plugin checkout next to this one, already built into the files the app loads. */

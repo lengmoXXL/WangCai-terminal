@@ -61,13 +61,13 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
     await page.getByRole('button', { name: '关闭 终端' }).click();
 
     await createWorkspace(page);
-    const workspaceSession = await page.evaluate(async () => (await window.wangcai.request('terminal-agent', 'config')).workspaces[0].sessionId);
+    const workspaceSession = await page.evaluate(async () => (await window.wangcai.call('request', 'terminal-agent', 'config')).workspaces[0].sessionId);
     await typeUntil(page, '.terminal-pane.active .xterm-helper-textarea', `cd '${directory}'`, async () => await page.getByRole('tablist', { name: '工作区', exact: true }).getByRole('tab').filter({ hasText: '示例 project' }).count() > 0);
 
     await openView(page, '终端');
     const panel = '.sidebar-panel[data-plugin=terminal]:visible';
     await page.locator(panel).waitFor();
-    assert.equal(await page.locator(panel).getAttribute('aria-label'), '示例 project', 'the tab is named after the directory the shell starts in');
+    assert.equal(await page.locator(panel).getAttribute('aria-label'), '示例 project - t1', 'the tab is named after the workspace and its first tab');
     const terminalSession = record();
     assert.notEqual(terminalSession, workspaceSession, 'the view opens a shell of its own');
     await typeUntil(page, `${panel} .xterm-helper-textarea`, 'printf "TERM_PWD=%s\\n" "$PWD"', async () => (await page.locator(`${panel} .xterm-rows`).textContent()).includes(`TERM_PWD=${directory}`));
@@ -88,11 +88,11 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
 
     await openView(page, '终端');
     await page.locator(panel).waitFor();
-    assert.equal(await page.locator(panel).getAttribute('aria-label'), '示例 project', 'the same directory is used again');
+    assert.equal(await page.locator(panel).getAttribute('aria-label'), '示例 project - t2', 'the workspace is used again, and its numbers only grow');
     const reopenedSession = record();
     await typeUntil(page, `${panel} .xterm-helper-textarea`, 'printf "RESTORED_PWD=%s\\n" "$PWD"', async () => (await page.locator(`${panel} .xterm-rows`).textContent()).includes(`RESTORED_PWD=${directory}`));
-    await page.getByRole('button', { name: '关闭 示例 project' }).click();
-    await page.waitForFunction(async (sessionId) => { try { await window.wangcai.request('terminal', 'describe', sessionId); return false; } catch { return true; } }, reopenedSession);
+    await page.getByRole('button', { name: '关闭 示例 project - t2' }).click();
+    await page.waitForFunction(async (sessionId) => { try { await window.wangcai.call('request', 'terminal', 'describe', sessionId); return false; } catch { return true; } }, reopenedSession);
     let killed = false;
     for (let attempt = 0; attempt < 50 && !killed; attempt++) {
       killed = (await sessions()).every((session) => session.id !== reopenedSession);
@@ -168,7 +168,7 @@ test('a printed web address is a link the app opens in a browser', { timeout: 18
     writeInit(home);
     desktop = await launchApp(home, env);
     // The window hands a link to the system browser: the test takes that call instead.
-    await desktop.evaluate(({ ipcMain }) => { ipcMain.removeHandler('wangcai:open'); ipcMain.handle('wangcai:open', (_event, url) => { globalThis.opened = url; }); });
+    await desktop.evaluate(({ shell }) => { shell.openExternal = async (url) => { globalThis.opened = url; }; });
     page = await desktop.firstWindow();
     await waitForShell(page);
     await createWorkspace(page);
