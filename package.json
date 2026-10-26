@@ -13,11 +13,12 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "node build.mjs && node --test --test-concurrency=1 test/*.test.cjs",
+    "test": "node build.mjs && node --test test/*.test.cjs",
     "typecheck": "tsc"
   },
   "devDependencies": {
     "@lengmoxxl/sdk": "^0.1.12",
+    "@lengmoxxl/wangcai-testkit": "^0.1.7",
     "@types/node": "^24.19.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
