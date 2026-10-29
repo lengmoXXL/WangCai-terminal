@@ -213,13 +213,15 @@ function lineText(term: Terminal, y: number) {
 // inside `INSTALL.md` — so the wider reading is the one the line printed, and a path leads where two
 // readings are equally wide. The paths come first, and their order is what breaks that tie.
 function candidates(term: Terminal, y: number) {
+  // xterm-link-provider names the terminal after the package it was typed against, which this plugin no longer uses.
+  const providerTerminal = term as unknown as Parameters<typeof computeLink>[2];
   const found = [
-    ...computeLink(y, scan, term).map(({ range, text }) => {
+    ...computeLink(y, scan, providerTerminal).map(({ range, text }) => {
       const location = fileLocation(text);
       return { range, text, path: location?.path ?? text, line: location?.line, column: location?.column };
     }),
     // The word regex captures nothing, so the link is its whole match.
-    ...computeLink(y, word, term, 0).map(({ range, text }) => ({ range, text, path: text, line: undefined, column: undefined })),
+    ...computeLink(y, word, providerTerminal, 0).map(({ range, text }) => ({ range, text, path: text, line: undefined, column: undefined })),
   ];
   return found.filter((candidate, at) => !found.some((other, index) =>
     holds(other.range, candidate.range) && (!holds(candidate.range, other.range) || index < at)));

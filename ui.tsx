@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import type { WorkspaceActive } from '@lengmoxxl/sdk';
 import type { TabRecord, UiContext } from '@lengmoxxl/sdk/channel';
 import { trackCommand } from './command';
@@ -26,13 +27,11 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     const term = new Terminal({
       fontSize: profile.font.size, lineHeight: profile.font.lineHeight,
       fontFamily: profile.font.family,
-      // xterm takes its scrollbar width from the overview ruler, which also paints the ruler outline.
-      overviewRuler: { width: 10 },
       scrollback: 10_000,
-      theme: { ...profile.theme, overviewRulerBorder: profile.theme.background, selectionBackground: profile.theme.selection },
+      theme: { ...profile.theme, selectionBackground: profile.theme.selection },
     });
-    const addon = new FitAddon();
-    term.loadAddon(addon);
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
     // What a program in the terminal copies goes to the system clipboard: OSC 52.
     term.loadAddon(new ClipboardAddon());
     // What the terminal prints as a web address is a link the app opens in a browser, on the click
@@ -41,6 +40,13 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       if (event.metaKey) void context.host.open(uri).catch((error: Error) => setError(error.message));
     }));
     term.open(element.current!);
+    // The rows are drawn on a canvas: the DOM renderer rebuilds the elements of every row a frame changes.
+    try {
+      const webglAddon = new WebglAddon();
+      // A GPU that takes its context away hands the rows back to the DOM renderer.
+      webglAddon.onContextLoss(() => webglAddon.dispose());
+      term.loadAddon(webglAddon);
+    } catch { /* a GPU that cannot draw here leaves the rows as elements */ }
     const links = registerFileLinks(term, {
       resolve: (paths) => context.ui.request('resolve', { sessionId, paths }),
       activate: (path, line, column) => { void context.ui.request('click', { sessionId, location: { path, line, column } }).catch((error: Error) => setError(error.message)); },
@@ -101,7 +107,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
             if (!alive) return;
             replaying = false;
             if (!element.current?.offsetWidth) return;
-            addon.fit();
+            fitAddon.fit();
             sendSize();
           });
           return;
@@ -117,7 +123,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     });
     const resize = term.onResize(sendSize);
     const observer = new ResizeObserver(() => {
-      if (!replaying && element.current?.offsetWidth && element.current?.offsetHeight) addon.fit();
+      if (!replaying && element.current?.offsetWidth && element.current?.offsetHeight) fitAddon.fit();
     });
     observer.observe(element.current!);
     return () => {
