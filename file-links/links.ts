@@ -95,27 +95,31 @@ const cacheTtl = 10_000;
 /** The longest path worth resolving. */
 const maxPathLength = 1024;
 
-interface FileLinks {
+interface LinkTargets {
   /** Which of these paths exist, and the absolute path each one resolves to. */
   resolve(paths: string[]): Promise<Record<string, string>>;
   /** Open what was clicked. */
   activate(path: string, line?: number, column?: number): void;
+  /** Open a web address in a browser, printed as text or handed over as an OSC 8 link. */
+  openAddress(uri: string): void;
 }
 
-export function registerFileLinks(term: Terminal, files: FileLinks) {
-  // An OSC 8 link hands over its target as text, which is read the same way a printed one is.
+export function registerFileLinks(term: Terminal, targets: LinkTargets) {
+  // An OSC 8 link hands over its target as text, which is read the same way a printed one is. It draws its own
+  // pointer and underline on hover, which a provider's link only shows while Command is held.
   term.options.linkHandler = {
     allowNonHttpProtocols: true,
     // A link opens on the click that holds Command: without it the click stays a click in the shell.
     activate: (event, text) => {
       if (!event.metaKey) return;
       const location = fileLocation(text);
-      if (location) files.activate(location.path, location.line, location.column);
+      if (location) targets.activate(location.path, location.line, location.column);
+      else if (/^https?:/i.test(text)) targets.openAddress(text);
     },
   };
 
-  // What Command shows: a link hands xterm the two decorations it draws with, so a line read while
-  // the key is held is underlined and pointed at.
+  // What Command shows on a line of the provider's: a link hands xterm the two decorations it draws with, so a
+  // line read while the key is held is underlined and pointed at.
   let command = false;
   let hovered: ILink | undefined;
   const setCommand = (held: boolean) => {
@@ -135,7 +139,7 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
   const ask = (text: string, paths: string[]) => {
     const onTheWay = pending.get(text);
     if (onTheWay) return onTheWay;
-    const look = files.resolve(paths)
+    const look = targets.resolve(paths)
       .then((resolved) => {
         known.set(text, resolved);
         return resolved;
@@ -173,7 +177,7 @@ export function registerFileLinks(term: Terminal, files: FileLinks) {
               hover: () => { hovered = link; },
               leave: () => { if (hovered === link) hovered = undefined; },
               activate: (event: MouseEvent) => {
-                if (event.metaKey) files.activate(resolved[candidate.path], candidate.line, candidate.column);
+                if (event.metaKey) targets.activate(resolved[candidate.path], candidate.line, candidate.column);
               },
             };
             return link;

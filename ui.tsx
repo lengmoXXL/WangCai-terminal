@@ -34,11 +34,10 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     term.loadAddon(fitAddon);
     // What a program in the terminal copies goes to the system clipboard: OSC 52.
     term.loadAddon(new ClipboardAddon());
-    // What the terminal prints as a web address is a link the app opens in a browser, on the click
-    // that holds Command: on its own the click stays a click in the terminal.
-    term.loadAddon(new WebLinksAddon((event, uri) => {
-      if (event.metaKey) void context.host.open(uri).catch((error: Error) => setError(error.message));
-    }));
+    const openAddress = (uri: string) => { void context.host.open(uri).catch((error: Error) => setError(error.message)); };
+    // What the terminal prints as a web address is a link the app opens in a browser, on the click that holds
+    // Command: on its own the click stays a click in the terminal.
+    term.loadAddon(new WebLinksAddon((event, uri) => { if (event.metaKey) openAddress(uri); }));
     term.open(element.current!);
     // The rows are drawn on a canvas: the DOM renderer rebuilds the elements of every row a frame changes.
     try {
@@ -50,6 +49,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     const links = registerFileLinks(term, {
       resolve: (paths) => context.ui.request('resolve', { sessionId, paths }),
       activate: (path, line, column) => { void context.ui.request('click', { sessionId, location: { path, line, column } }).catch((error: Error) => setError(error.message)); },
+      openAddress,
     });
     // Command is what shows a link, and what the click on it opens with.
     const command = trackCommand(term.element!, links.setCommand);

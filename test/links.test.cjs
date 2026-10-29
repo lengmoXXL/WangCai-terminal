@@ -12,17 +12,26 @@ const { fileLocation, registerFileLinks } = compiled.exports;
 function pane(terminal, existing, hold = () => {}) {
   let provider;
   const clicks = [];
+  const opened = [];
   // A terminal face the plugin registers with, whose columns answer for the terminal it draws on: a
   // resize cuts the rows again under a line the plugin already read.
-  const handle = registerFileLinks({ options: {}, get cols() { return terminal.cols; }, buffer: terminal.buffer, registerLinkProvider(value) { provider = value; } }, {
+  const face = {
+    options: {}, get cols() { return terminal.cols; }, buffer: terminal.buffer,
+    registerLinkProvider(value) { provider = value; },
+  };
+  const handle = registerFileLinks(face, {
     resolve: async (paths) => {
       await hold();
       return Object.fromEntries(paths.filter(path => path in existing).map(path => [path, existing[path]]));
     },
     activate: (path, line, column) => clicks.push({ path, line, column }),
+    openAddress: (uri) => opened.push(uri),
   });
   const write = (text) => new Promise(resolve => terminal.write(text, resolve));
-  return { write, clicks, setCommand: handle.setCommand, links: (y) => new Promise(resolve => provider.provideLinks(y, resolve)) };
+  return {
+    write, clicks, opened, setCommand: handle.setCommand, osc: face.options.linkHandler,
+    links: (y) => new Promise(resolve => provider.provideLinks(y, resolve)),
+  };
 }
 
 test('file links: absolute paths, file URLs, line/column and wrapped Unicode cells', async () => {
@@ -176,4 +185,18 @@ test('a path the terminal wrapped is one link on every row, and a resize is read
   assert.deepEqual(found[0].range, { start: cellOf(0), end: cellOf(path.length - 1) }, 'the link covers the rows the path has now');
   terminal.dispose();
   resized.dispose();
+});
+
+test('OSC 8 links: an address opens in a browser on Command, and a path opens its file', () => {
+  const terminal = new Terminal({ cols: 24, rows: 5, allowProposedApi: true });
+  const view = pane(terminal, {});
+  view.osc.activate({ metaKey: false }, 'https://example.com/a');
+  assert.deepEqual(view.opened, [], 'a click on its own opens nothing');
+  view.osc.activate({ metaKey: true }, 'https://example.com/a');
+  assert.deepEqual(view.opened, ['https://example.com/a'], 'the app is handed the address');
+  view.osc.activate({ metaKey: true }, '/work/main.rs:3');
+  assert.deepEqual(view.clicks, [{ path: '/work/main.rs', line: 3, column: undefined }], 'a path handed over this way opens its file');
+  view.osc.activate({ metaKey: true }, 'javascript:alert(1)');
+  assert.deepEqual(view.opened, ['https://example.com/a'], 'a target that is neither the web nor a file opens nothing');
+  terminal.dispose();
 });
