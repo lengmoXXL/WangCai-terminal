@@ -43,6 +43,14 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       const cols = cell ? Math.floor(pane.clientWidth / cell) : proposed.cols;
       if (cols !== term.cols || proposed.rows !== term.rows) term.resize(cols, proposed.rows);
     };
+    // A program asks for its cursor with DECSCUSR, and its reset, `CSI 0 SP q`, means the terminal's own default, which
+    // xterm 5.5 reads as a blinking block instead. Every other parameter already matches, so only the reset is answered.
+    term.parser.registerCsiHandler({ intermediates: ' ', final: 'q' }, (params) => {
+      if (Number(params[0]) !== 0) return false;
+      term.options.cursorStyle = 'block';
+      term.options.cursorBlink = false;
+      return true;
+    });
     // What a program in the terminal copies goes to the system clipboard: OSC 52.
     term.loadAddon(new ClipboardAddon());
     const openAddress = (uri: string) => { void context.host.open(uri).catch((error: Error) => setError(error.message)); };
