@@ -4,6 +4,8 @@
    program in it paints, which is its own background and rarely the page's. */
 .wangcai-terminal .terminal-pane { height: 100%; display: flex; flex-direction: column; }
 .wangcai-terminal .terminal-surface { flex: 1; min-height: 0; }
+/* No bar: the grid is sized over the column one would take, and the wheel scrolls the scrollback. */
+.wangcai-terminal .xterm-viewport::-webkit-scrollbar { display: none; }
 /* Rows are elements only where the renderer falls back to the DOM: xterm rounds each row width but lays the glyphs
    out on the unrounded grid, so size rows to their content. */
 .wangcai-terminal .terminal-surface .xterm-rows > div { width: max-content !important; }

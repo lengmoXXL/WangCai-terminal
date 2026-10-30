@@ -32,6 +32,17 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+    // The addon leaves the column a scrollbar reserves to the terminal's own background, which would read as a gap at
+    // the pane's right edge: the grid is sized to the pane instead.
+    const fit = () => {
+      const pane = element.current;
+      const proposed = fitAddon.proposeDimensions();
+      if (!pane?.offsetWidth || !pane.offsetHeight || !proposed) return;
+      const screen = term.element?.querySelector('.xterm-screen');
+      const cell = screen && term.cols ? screen.getBoundingClientRect().width / term.cols : 0;
+      const cols = cell ? Math.floor(pane.clientWidth / cell) : proposed.cols;
+      if (cols !== term.cols || proposed.rows !== term.rows) term.resize(cols, proposed.rows);
+    };
     // What a program in the terminal copies goes to the system clipboard: OSC 52.
     term.loadAddon(new ClipboardAddon());
     const openAddress = (uri: string) => { void context.host.open(uri).catch((error: Error) => setError(error.message)); };
@@ -107,7 +118,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
             if (!alive) return;
             replaying = false;
             if (!element.current?.offsetWidth) return;
-            fitAddon.fit();
+            fit();
             sendSize();
           });
           return;
@@ -122,9 +133,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       send('input', { data });
     });
     const resize = term.onResize(sendSize);
-    const observer = new ResizeObserver(() => {
-      if (!replaying && element.current?.offsetWidth && element.current?.offsetHeight) fitAddon.fit();
-    });
+    const observer = new ResizeObserver(() => { if (!replaying) fit(); });
     observer.observe(element.current!);
     return () => {
       alive = false;
