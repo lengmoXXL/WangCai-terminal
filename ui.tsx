@@ -32,8 +32,8 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    // The addon leaves the column a scrollbar reserves to the terminal's own background, which would read as a gap at
-    // the pane's right edge: the grid is sized to the pane instead.
+    // The addon keeps back the column a scrollbar would take, which leaves the grid a column short of the pane: the
+    // columns are counted from the pane's width instead.
     const fit = () => {
       const pane = element.current;
       const proposed = fitAddon.proposeDimensions();
