@@ -205,18 +205,25 @@ test('a pane attaches again when the socket to the node drops', { timeout: 18000
   assert.equal(await page.locator(`${panel} .terminal-message.error`).count(), 0, 'a recovered pane says nothing about the drop');
 }));
 
-test('the view takes the keys when its own key brings it forward', { timeout: 180000 }, (test) => withHome('wangcai-terminal-keys', lists, async ({ home, open }) => {
+test('a key that shows the view puts the keys in its terminal', { timeout: 180000 }, (test) => withHome('wangcai-terminal-keys', lists, async ({ home, open }) => {
   const { page } = await open();
+  const away = () => page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
   await createWorkspace(page);
-  await openView(page, '终端');
+  // The keys are elsewhere: nothing in the window holds them until the key asks for the view.
+  await away();
+  for (const key of ['Space', 't', 't']) await page.keyboard.press(key);
   await page.locator(shown).waitFor();
   const view = await watch(test, home, newestSession(home));
   await until(() => view.text().includes('$'));
-  // The keys are elsewhere: the page has them, not the pane the key is about to bring forward.
-  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+  // Nothing is clicked between the key and the typing: showing the view is what puts the keys in it.
+  const type = async (command, want) => {
+    await page.keyboard.type(command);
+    await page.keyboard.press('Enter');
+    await until(() => view.text().includes(want));
+  };
+  await type("printf 'OPENED_%s\\n' ok", 'OPENED_ok');
+  // The view is open now, so the same key brings it forward instead of opening it.
+  await away();
   for (const key of ['Space', 't', 't']) await page.keyboard.press(key);
-  // Nothing is clicked between the key and the typing: showing the view is what put the keys in it.
-  await page.keyboard.type("printf 'KEYS_%s\\n' ok");
-  await page.keyboard.press('Enter');
-  await until(() => view.text().includes('KEYS_ok'));
+  await type("printf 'SHOWN_%s\\n' ok", 'SHOWN_ok');
 }));

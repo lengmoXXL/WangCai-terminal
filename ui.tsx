@@ -152,13 +152,16 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     };
   }, [context, sessionId]);
 
-  // A key that shows this view puts the focus on the panel, and what the panel draws is a terminal.
+  // A key that shows this view leaves the keys on the panel, and what the panel draws is a terminal. Two Escapes leave a
+  // field the same way, and there the focus stays where they put it.
   useEffect(() => {
     const panel = element.current?.closest<HTMLElement>('[data-plugin]');
     if (!panel) return;
     const focus = () => { if (element.current?.offsetWidth) terminal.current?.focus(); };
-    panel.addEventListener('focus', focus);
-    return () => panel.removeEventListener('focus', focus);
+    panel.addEventListener('wangcai:shown', focus);
+    // A panel a key opened is focused before the pane in it exists, so it is taken here as well.
+    if (panel === document.activeElement) focus();
+    return () => panel.removeEventListener('wangcai:shown', focus);
   }, []);
 
   return <div className="terminal-pane">
