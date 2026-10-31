@@ -152,16 +152,16 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     };
   }, [context, sessionId]);
 
-  // A key that shows this view leaves the keys on the panel, and what the panel draws is a terminal. Two Escapes leave a
+  // A key that shows this view leaves the keys on the page, and what the page draws is a terminal. Two Escapes leave a
   // field the same way, and there the focus stays where they put it.
   useEffect(() => {
-    const panel = element.current?.closest<HTMLElement>('[data-plugin]');
-    if (!panel) return;
-    const focus = () => { if (element.current?.offsetWidth) terminal.current?.focus(); };
-    panel.addEventListener('wangcai:shown', focus);
-    // A panel a key opened is focused before the pane in it exists, so it is taken here as well.
-    if (panel === document.activeElement) focus();
-    return () => panel.removeEventListener('wangcai:shown', focus);
+    const page = element.current?.closest<HTMLElement>('[data-plugin]');
+    if (!page) return;
+    const focus = () => terminal.current?.focus();
+    page.addEventListener('wangcai:shown', focus);
+    // A page a key opened is focused before the terminal in it exists, so it is taken here as well.
+    if (page === document.activeElement) focus();
+    return () => page.removeEventListener('wangcai:shown', focus);
   }, []);
 
   return <div className="terminal-pane">
@@ -179,7 +179,7 @@ function openTab(context: UiContext, tab: TerminalRef & { workspaceId?: string }
       container.style.fontFamily = profile.font.family;
       const root = createRoot(container);
       return {
-        // A tab redrawn because the app's list changed is not a selection, so only a click on the pane takes the focus.
+        // A tab redrawn because the app's list changed is not a selection, so this only redraws and leaves the focus alone.
         onSelect: () => { root.render(<TerminalPane context={context} sessionId={tab.sessionId} />); },
         dispose: () => root.unmount(),
       };

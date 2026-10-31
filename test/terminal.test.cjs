@@ -208,11 +208,15 @@ test('a pane attaches again when the socket to the node drops', { timeout: 18000
 test('a key that shows the view puts the keys in its terminal', { timeout: 180000 }, (test) => withHome('wangcai-terminal-keys', lists, async ({ home, open }) => {
   const { page } = await open();
   const away = () => page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+  const showView = async () => {
+    for (const key of ['Space', 't', 't']) await page.keyboard.press(key);
+    // The key reaches the view through the main process, so the keys are this view's only once its terminal holds them.
+    await until(() => page.evaluate((selector) => document.querySelector(`${selector} .xterm-helper-textarea`) === document.activeElement, panel));
+  };
   await createWorkspace(page);
   // The keys are elsewhere: nothing in the window holds them until the key asks for the view.
   await away();
-  for (const key of ['Space', 't', 't']) await page.keyboard.press(key);
-  await page.locator(shown).waitFor();
+  await showView();
   const view = await watch(test, home, newestSession(home));
   await until(() => view.text().includes('$'));
   // Nothing is clicked between the key and the typing: showing the view is what puts the keys in it.
@@ -224,6 +228,20 @@ test('a key that shows the view puts the keys in its terminal', { timeout: 18000
   await type("printf 'OPENED_%s\\n' ok", 'OPENED_ok');
   // The view is open now, so the same key brings it forward instead of opening it.
   await away();
-  for (const key of ['Space', 't', 't']) await page.keyboard.press(key);
+  await showView();
   await type("printf 'SHOWN_%s\\n' ok", 'SHOWN_ok');
+}));
+
+test('two Escapes leave the terminal', { timeout: 180000 }, () => withHome('wangcai-terminal-escape', lists, async ({ open }) => {
+  const { page } = await open();
+  await createWorkspace(page);
+  await openView(page, '终端');
+  await page.locator(`${shown} .xterm-helper-textarea`).click();
+  // A pair has to land inside the 300ms the window allows, so both presses go out in one go.
+  await page.evaluate((selector) => {
+    const field = document.querySelector(`${selector} .xterm-helper-textarea`);
+    for (let index = 0; index < 2; index += 1) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  }, panel);
+  // The keys stay where the pair put them: the terminal does not take them back.
+  await until(() => page.evaluate((selector) => document.querySelector(selector) === document.activeElement, panel));
 }));
