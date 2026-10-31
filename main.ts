@@ -2,7 +2,6 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MachineConnection, Session, WorkspaceActive } from '@lengmoxxl/sdk';
 import type { MainContext } from '@lengmoxxl/sdk/channel';
-import { registerFilePaths } from './file-links/paths';
 import type { Machine, TerminalRef } from './shared';
 
 export const keys = { '<leader>tt': { global: true, desc: '打开终端视图', event: 'core:show-view', data: { plugin: 'terminal' } } };
@@ -70,13 +69,6 @@ export async function activate(context: MainContext) {
     return machine;
   }
 
-  // As machineOf, but for a file request: a session this plugin no longer knows is not an error there.
-  function hostOf(sessionId: string) {
-    const machine = sessions.value[sessionId];
-    const node = machine && connections.get(key(machine));
-    return machine && node ? { machine, node } : undefined;
-  }
-
   function nextTitle(active: WorkspaceActive) {
     const number = (tabs.value[active.workspaceId] ?? 0) + 1;
     tabs.value[active.workspaceId] = number;
@@ -102,7 +94,6 @@ export async function activate(context: MainContext) {
     if (!session) throw new Error('这个终端已经找不到了');
     return ref(machine, node, session, cwd);
   }));
-  handlers.push(...registerFilePaths(context, hostOf));
   handlers.push(context.ui.handle('address', (sessionId: string) => {
     const node = connections.get(key(machineOf(sessionId)));
     if (!node) throw new Error('Machine is not connected');

@@ -2,13 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Terminal } from '@xterm/xterm';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
-import { WebLinksAddon } from '@xterm/addon-web-links';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import type { WorkspaceActive } from '@lengmoxxl/sdk';
 import type { TabRecord, UiContext } from '@lengmoxxl/sdk/channel';
-import { trackCommand } from './command';
-import { registerFileLinks } from './file-links/links';
 import type { Settings, TerminalRef } from './shared';
 import '@xterm/xterm/css/xterm.css';
 import './style.css';
@@ -43,6 +40,8 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       const cols = cell ? Math.floor(pane.clientWidth / cell) : proposed.cols;
       if (cols !== term.cols || proposed.rows !== term.rows) term.resize(cols, proposed.rows);
     };
+    // What a program in the terminal copies goes to the system clipboard: OSC 52.
+    term.loadAddon(new ClipboardAddon());
     // A program asks for its cursor with DECSCUSR, and its reset, `CSI 0 SP q`, means the terminal's own default, which
     // xterm 5.5 reads as a blinking block instead. Every other parameter already matches, so only the reset is answered.
     term.parser.registerCsiHandler({ intermediates: ' ', final: 'q' }, (params) => {
@@ -51,12 +50,9 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       term.options.cursorBlink = false;
       return true;
     });
-    // What a program in the terminal copies goes to the system clipboard: OSC 52.
-    term.loadAddon(new ClipboardAddon());
-    const openAddress = (uri: string) => { void context.host.open(uri).catch((error: Error) => setError(error.message)); };
-    // What the terminal prints as a web address is a link the app opens in a browser, on the click that holds
-    // Command: on its own the click stays a click in the terminal.
-    term.loadAddon(new WebLinksAddon((event, uri) => { if (event.metaKey) openAddress(uri); }));
+    // A program can mark text as a link (OSC 8). This terminal shows none, so the sequence is taken and dropped, which
+    // keeps xterm from drawing a link of its own over the text.
+    term.parser.registerOscHandler(8, () => true);
     term.open(element.current!);
     // The rows are drawn on a canvas: the DOM renderer rebuilds the elements of every row a frame changes.
     try {
@@ -65,13 +61,6 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       webglAddon.onContextLoss(() => webglAddon.dispose());
       term.loadAddon(webglAddon);
     } catch { /* a GPU that cannot draw here leaves the rows as elements */ }
-    const links = registerFileLinks(term, {
-      resolve: (paths) => context.ui.request('resolve', { sessionId, paths }),
-      activate: (path, line, column) => { void context.ui.request('click', { sessionId, location: { path, line, column } }).catch((error: Error) => setError(error.message)); },
-      openAddress,
-    });
-    // Command is what shows a link, and what the click on it opens with.
-    const command = trackCommand(term.element!, links.setCommand);
     terminal.current = term;
     let alive = true;
     let replaying = false;
@@ -147,7 +136,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       alive = false;
       clearTimeout(retry);
       input.dispose(); resize.dispose(); observer.disconnect();
-      command.dispose(); links.dispose(); socket?.close(); term.dispose();
+      socket?.close(); term.dispose();
       terminal.current = null;
     };
   }, [context, sessionId]);

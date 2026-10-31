@@ -21,8 +21,7 @@ const newestSession = (home) => Object.keys(JSON.parse(readFileSync(join(home, '
 const binary = join(wangcaiApp(), 'wangcaicli/dist/debug/wangcai');
 
 // The pane draws its rows on a canvas, which tells a test nothing, so its text is read off the stream the node sends
-// it and parsed into a terminal of the size the pane held at the attach. A case that turns cells into points waits for
-// the pane to hold still first: a grid the pane outgrows puts the points a case works out on other cells.
+// it and parsed into a terminal of the size the pane held at the attach.
 const watch = async (test, home, sessionId) => {
   const node = await openMachine({ type: 'local', binary, env: { HOME: home } });
   // The rows are read off buffer.active, which xterm hands out only with the proposed API allowed.
@@ -37,7 +36,6 @@ const watch = async (test, home, sessionId) => {
   // that failed halfway from holding the run open.
   node.onState((state) => { if (state.status === 'connecting') close(); });
   return {
-    rows,
     // What it printed, its rows run together the way a line the pane wrapped runs on into the next one.
     text: () => rows().join(''),
     size: () => ({ cols: terminal.cols, rows: terminal.rows }),
@@ -122,65 +120,34 @@ test('what a program in the terminal copies reaches the system clipboard', { tim
   await typeUntil(page, shown, `printf '${sequence}'`, async () => (await page.evaluate(() => navigator.clipboard.readText())) === text);
 }));
 
-test('a printed web address is a link the app opens in a browser', { timeout: 180000 }, (test) => withHome('wangcai-terminal-links', lists, async ({ home, open }) => {
+test('a link a program marks is drawn as text, and opens nothing', { timeout: 180000 }, (test) => withHome('wangcai-terminal-osc8', lists, async ({ home, open }) => {
   const { desktop, page } = await open();
-  // The window hands a link to the system browser: the test takes that call instead.
+  // The window hands an address to the system browser: the test takes that call instead.
   await desktop.evaluate(({ shell }) => { shell.openExternal = async (url) => { globalThis.opened = url; }; });
-  // An address longer than the pane is wide, so it prints across a wrap.
-  const address = `https://example.com/${'a-very-long-address-segment/'.repeat(7)}page.html`;
-
+  const text = 'OSC8_TEXT';
+  // OSC 8 marks the text between two of its sequences as a link to the address it carries.
+  const sequence = `\\033]8;;https://example.com/osc8\\033\\\\${text}\\033]8;;\\033\\\\`;
   await createWorkspace(page);
   await openView(page, '终端');
   await page.locator(shown).waitFor();
-  // A click is what waits for the pane's box to hold still; waiting for it to be visible is not.
-  await page.locator(`${shown} .xterm-helper-textarea`).click();
   const view = await watch(test, home, newestSession(home));
-  await typeUntil(page, shown, `clear; stty -echo; printf '%s\\n' '${address}'`, () => view.text().includes(address.slice(-12)));
-  const printed = await view.rows();
-  const last = printed.findLastIndex((row) => row.includes(address.slice(-16)));
-  assert.notEqual(last, -1, `no row holds the end of the address: ${JSON.stringify(printed.filter(Boolean))}`);
-  let first = last;
-  while (first > 0 && printed[first - 1] && address.includes(printed[first - 1])) first--;
-  assert.ok(last > first, 'the printed address wraps');
-
+  // The printed line is on screen once `clear` has wiped the command the shell echoed for it.
+  await typeUntil(page, shown, `clear; printf '${sequence}\\n'`, () => view.text().includes(text) && !view.text().includes('printf'));
   const screen = await page.locator(`${panel} .xterm-screen`).boundingBox();
+  // The middle of the first cell, from the size the pane drew its cells at.
   const { cols, rows } = view.size();
-  // The buffer holds the scrollback too, and the pane shows the last rows of it.
-  const top = printed.length - rows;
-  // The point one character of a row sits at, from the size the pane drew its cells at.
-  const point = (row, at) => [screen.x + (screen.width / cols) * (at + 0.5), screen.y + (screen.height / rows) * (row - top + 0.5)];
-  // The pane answers a link with the cursor, and answers on entering a row rather than on staying in it.
-  const answers = async (row, at) => {
-    const [x, y] = point(row, at);
-    await page.mouse.move(0, 0);
-    await page.mouse.move(x, y);
-    // The pane answers the move a frame later, not within the move itself.
-    await page.waitForTimeout(80);
-    return (await page.locator('.xterm-cursor-pointer').count()) > 0;
-  };
-
-  // Every row the wrap put the address on answers the pointer, and a cell past its end does not: the link is those
-  // rows, not more.
-  await until(async () => {
-    for (let row = first; row <= last; row++) if (!(await answers(row, 1))) return false;
-    return !(await answers(last + 1, cols - 1));
-  });
-
+  const [x, y] = [screen.x + screen.width / cols / 2, screen.y + screen.height / rows / 2];
+  // Command is the key links opened with: not even that makes a link of this text.
   await page.keyboard.down('Meta');
-  // The click that holds Command is what opens the address.
-  const [x, y] = point(first, 1);
+  await page.mouse.move(x, y);
+  // The pointer is put on a link a frame after the move, not within the move itself.
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.xterm-cursor-pointer').count(), 0, 'the marked text is not a link');
   await page.mouse.click(x, y);
-  let opened;
-  await until(async () => (opened = await desktop.evaluate(() => globalThis.opened)) !== undefined);
-  assert.equal(opened, address, 'the app is handed the address');
-
   await page.keyboard.up('Meta');
-  await desktop.evaluate(() => { globalThis.opened = undefined; });
-  await page.mouse.click(x, y);
-  // The click reaches the app either way; what this gives it is the time to have taken it and opened nothing, which is
-  // the only way a refusal can show.
+  // Nothing was opened, so there is no event to wait for: the click is given the time to have opened something.
   await page.waitForTimeout(500);
-  assert.equal(await desktop.evaluate(() => globalThis.opened), undefined, 'a click that holds no Command opens nothing');
+  assert.equal(await desktop.evaluate(() => globalThis.opened), undefined, 'and clicking it opens nothing');
 }));
 
 test('a pane attaches again when the socket to the node drops', { timeout: 180000 }, (test) => withWindow('wangcai-terminal-socket', lists, async ({ home, page }) => {
