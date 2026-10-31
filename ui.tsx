@@ -152,6 +152,15 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     };
   }, [context, sessionId]);
 
+  // A key that shows this view puts the focus on the panel, and what the panel draws is a terminal.
+  useEffect(() => {
+    const panel = element.current?.closest<HTMLElement>('[data-plugin]');
+    if (!panel) return;
+    const focus = () => { if (element.current?.offsetWidth) terminal.current?.focus(); };
+    panel.addEventListener('focus', focus);
+    return () => panel.removeEventListener('focus', focus);
+  }, []);
+
   return <div className="terminal-pane">
     <div className="terminal-surface" ref={element} />
     {error && <div className="terminal-message error" role="alert">{error}</div>}

@@ -204,3 +204,19 @@ test('a pane attaches again when the socket to the node drops', { timeout: 18000
   await typeUntil(page, shown, "printf 'AFTER_DROP_%s\\n' ok", () => view.text().includes('AFTER_DROP_ok'));
   assert.equal(await page.locator(`${panel} .terminal-message.error`).count(), 0, 'a recovered pane says nothing about the drop');
 }));
+
+test('the view takes the keys when its own key brings it forward', { timeout: 180000 }, (test) => withHome('wangcai-terminal-keys', lists, async ({ home, open }) => {
+  const { page } = await open();
+  await createWorkspace(page);
+  await openView(page, '终端');
+  await page.locator(shown).waitFor();
+  const view = await watch(test, home, newestSession(home));
+  await until(() => view.text().includes('$'));
+  // The keys are elsewhere: the page has them, not the pane the key is about to bring forward.
+  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+  for (const key of ['Space', 't', 't']) await page.keyboard.press(key);
+  // Nothing is clicked between the key and the typing: showing the view is what put the keys in it.
+  await page.keyboard.type("printf 'KEYS_%s\\n' ok");
+  await page.keyboard.press('Enter');
+  await until(() => view.text().includes('KEYS_ok'));
+}));
