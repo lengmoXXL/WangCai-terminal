@@ -4,7 +4,7 @@ import type { MachineConnection, Session, WorkspaceActive } from '@lengmoxxl/sdk
 import type { MainContext } from '@lengmoxxl/sdk/channel';
 import type { Machine, TerminalRef } from './shared';
 
-export const keys = { '<leader>tt': { global: true, desc: '打开终端视图', event: 'core:show-view', data: { plugin: 'terminal' } } };
+export const keys = { '<leader>t': { global: true, desc: '打开终端视图', event: 'core:show-view', data: { plugin: 'terminal' } } };
 
 // Which fields this plugin takes from init.ts, and the default each one falls back to.
 export const config = {

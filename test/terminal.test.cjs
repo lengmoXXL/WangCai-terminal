@@ -176,7 +176,7 @@ test('a key that shows the view puts the keys in its terminal', { timeout: 18000
   const { page } = await open();
   const away = () => page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
   const showView = async () => {
-    for (const key of ['Space', 't', 't']) await page.keyboard.press(key);
+    for (const key of ['Control+Space', 't']) await page.keyboard.press(key);
     // The key reaches the view through the main process, so the keys are this view's only once its terminal holds them.
     await until(() => page.evaluate((selector) => document.querySelector(`${selector} .xterm-helper-textarea`) === document.activeElement, panel));
   };
