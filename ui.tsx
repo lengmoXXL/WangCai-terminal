@@ -12,6 +12,13 @@ import './style.css';
 
 export const title = '终端';
 
+const concat = (chunks: Uint8Array[]) => {
+  const joined = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let at = 0;
+  for (const chunk of chunks) { joined.set(chunk, at); at += chunk.length; }
+  return joined;
+};
+
 let profile: Settings;
 let activeTerminal: WorkspaceActive | null = null;
 
@@ -68,6 +75,22 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     let socket: WebSocket | undefined;
     let attempt = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let shown = element.current!.offsetWidth > 0;
+    let frame = 0;
+    let chunks: Uint8Array[] = [];
+    const flush = () => {
+      frame = 0;
+      if (!alive || !shown) { chunks = []; return; }
+      const joined = chunks.length === 1 ? chunks[0] : concat(chunks);
+      chunks = [];
+      term.write(joined);
+    };
+    // One write a frame, as the terminal VS Code draws: the agent hands over more frames than the screen needs.
+    const feed = (data: Uint8Array) => {
+      if (!shown) return;
+      chunks.push(data);
+      if (!frame) frame = requestAnimationFrame(flush);
+    };
     const send = (op: string, params: Record<string, unknown> = {}) => {
       socket!.send(JSON.stringify({ op, session_id: sessionId, ...params }));
     };
@@ -75,8 +98,18 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       if (!ready || replaying) return;
       send('resize', { rows: term.rows, cols: term.cols });
     };
+    const close = () => {
+      ready = false;
+      replaying = false;
+      chunks = [];
+      cancelAnimationFrame(frame);
+      frame = 0;
+      if (socket?.readyState === WebSocket.OPEN) send('detach');
+      socket?.close();
+      socket = undefined;
+    };
     const reconnect = (error: Error) => {
-      if (!alive || retry !== undefined) return;
+      if (!alive || !shown || retry !== undefined) return;
       ready = false;
       setError(`${error.message}，正在重连…`);
       retry = setTimeout(() => void connect(), Math.min(1000 * 2 ** attempt++, 5000));
@@ -84,15 +117,15 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     // The app hands out another port when it reconnects, so every attempt asks for the address again.
     const connect = async () => {
       retry = undefined;
-      if (!alive) return;
+      if (!alive || !shown) return;
       let url: string;
       try { url = await context.ui.request<string>('address', sessionId); }
       catch (error) { reconnect(error as Error); return; }
-      if (!alive) return;
+      if (!alive || !shown) return;
       socket = new WebSocket(url);
       // Chromium hands binary frames over as blobs unless it is told otherwise.
       socket.binaryType = 'arraybuffer';
-      socket.onopen = () => { attempt = 0; send('attach'); };
+      socket.onopen = () => { attempt = 0; if (shown) send('attach'); else close(); };
       const decoder = new TextDecoder();
       socket.onmessage = ({ data }) => {
         if (!alive) return;
@@ -101,6 +134,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
           if (reply.error) setError(reply.error);
           return;
         }
+        if (!shown) return;
         const bytes = new Uint8Array(data);
         const length = new DataView(data).getUint32(0);
         const event = JSON.parse(decoder.decode(bytes.subarray(4, 4 + length))) as { event: string; rows: number; cols: number };
@@ -109,22 +143,23 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
           setError('');
           replaying = true;
           ready = true;
+          chunks = [];
           term.reset();
           term.resize(event.cols, event.rows);
           term.write(payload, () => {
             if (!alive) return;
             replaying = false;
-            if (!element.current?.offsetWidth) return;
+            if (!shown) return;
             fit();
             sendSize();
           });
           return;
         }
-        term.write(payload);
+        feed(payload);
       };
-      socket.onclose = () => { if (alive) reconnect(new Error('终端连接已断开')); };
+      socket.onclose = () => { if (alive && shown) reconnect(new Error('终端连接已断开')); };
     };
-    void connect();
+    if (shown) void connect();
     const input = term.onData((data) => {
       if (!ready || replaying) return;
       send('input', { data });
@@ -132,10 +167,18 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
     const resize = term.onResize(sendSize);
     const observer = new ResizeObserver(() => { if (!replaying) fit(); });
     observer.observe(element.current!);
+    // The tab in front is the only one drawn: a hidden tab lets its session go, and takes it back when it comes in front.
+    const shownObserver = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting === shown) return;
+      shown = entry.isIntersecting;
+      if (shown) void connect(); else close();
+    });
+    shownObserver.observe(element.current!);
     return () => {
       alive = false;
       clearTimeout(retry);
-      input.dispose(); resize.dispose(); observer.disconnect();
+      cancelAnimationFrame(frame);
+      input.dispose(); resize.dispose(); observer.disconnect(); shownObserver.disconnect();
       socket?.close(); term.dispose();
       terminal.current = null;
     };
