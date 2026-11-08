@@ -22,7 +22,7 @@ const concat = (chunks: Uint8Array[]) => {
 let profile: Settings;
 let activeTerminal: WorkspaceActive | null = null;
 
-function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: string }) {
+function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId: string; sessionId: string }) {
   const element = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal>(null);
   const [error, setError] = useState('');
@@ -119,7 +119,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       retry = undefined;
       if (!alive || !shown) return;
       let url: string;
-      try { url = await context.ui.request<string>('address', sessionId); }
+      try { url = await context.ui.request<string>('address', tabId); }
       catch (error) { reconnect(error as Error); return; }
       if (!alive || !shown) return;
       socket = new WebSocket(url);
@@ -182,7 +182,7 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
       socket?.close(); term.dispose();
       terminal.current = null;
     };
-  }, [context, sessionId]);
+  }, [context, tabId, sessionId]);
 
   // A key that shows this view leaves the keys on the page, and what the page draws is a terminal. Two Escapes leave a
   // field the same way, and there the focus stays where they put it.
@@ -204,15 +204,15 @@ function TerminalPane({ context, sessionId }: { context: UiContext; sessionId: s
 
 function openTab(context: UiContext, tab: TerminalRef & { workspaceId?: string }) {
   context.host.tabs({
-    id: tab.sessionId, title: tab.title, tooltip: `${tab.machine.name}: ${tab.location}`, workspaceId: tab.workspaceId,
-    onClose: () => { void context.ui.request('close', tab.sessionId).catch(() => {}); },
+    id: tab.tabId, title: tab.title, tooltip: `${tab.machine.name}: ${tab.location}`, workspaceId: tab.workspaceId,
+    onClose: () => { void context.ui.request('close', tab.tabId).catch(() => {}); },
     mount(container: HTMLElement) {
       container.classList.add('wangcai-terminal');
       container.style.fontFamily = profile.font.family;
       const root = createRoot(container);
       return {
         // A tab redrawn because the app's list changed is not a selection, so this only redraws and leaves the focus alone.
-        onSelect: () => { root.render(<TerminalPane context={context} sessionId={tab.sessionId} />); },
+        onSelect: () => { root.render(<TerminalPane context={context} tabId={tab.tabId} sessionId={tab.sessionId} />); },
         dispose: () => root.unmount(),
       };
     },

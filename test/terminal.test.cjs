@@ -51,7 +51,7 @@ const tabs = (page) => page.getByRole('tablist', { name: '工作区', exact: tru
 
 // The shell the plugin's own book holds for this home: one it was never asked to close stays in the book, so the
 // newest entry is the shell the pane is reading.
-const newestSession = (home) => Object.keys(JSON.parse(readFileSync(join(home, '.local/share/wangcai/data/terminal/sessions.json'), 'utf8'))).at(-1);
+const newestSession = (home) => Object.values(JSON.parse(readFileSync(join(home, '.local/share/wangcai/data/terminal/terminals.json'), 'utf8'))).at(-1).session;
 
 const binary = join(wangcaiApp(), 'wangcaicli/dist/debug/wangcai');
 
@@ -115,9 +115,13 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   await node.pty.close(terminalSession);
   node.disconnect();
   ({ page, close } = await open());
-  const failure = page.locator(`${panel} .terminal-message`);
-  await failure.waitFor();
-  assert.match(await failure.textContent(), /Terminal no longer exists/, 'a shell that died while the app was closed is reported');
+  const recovered = page.locator(panel);
+  await recovered.locator('.xterm-screen').waitFor();
+  assert.equal(await recovered.getAttribute('aria-label'), '示例 project - t1', 'a tab whose shell died keeps its name');
+  const replacement = newestSession(home);
+  assert.notEqual(replacement, terminalSession, 'the shell that died is replaced by a new one');
+  const resumed = await watch(test, home, replacement);
+  await typeUntil(page, shown, 'printf "RESUMED_PWD=%s\\n" "$PWD"', () => resumed.text().includes(`RESUMED_PWD=${directory}`));
   await closeView(page);
 
   await openView(page, '终端');

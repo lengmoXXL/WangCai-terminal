@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { MachineConnection, Session, WorkspaceActive } from '@lengmoxxl/sdk';
+import type { MachineConnection, WorkspaceActive } from '@lengmoxxl/sdk';
 import type { MainContext } from '@lengmoxxl/sdk/channel';
 import type { Machine, TerminalRef } from './shared';
 
@@ -15,6 +15,13 @@ export const config = {
   },
 };
 
+// The grid a shell is created with, which the pane then fits to the surface it draws on.
+const initialSize = { rows: 24, cols: 80 };
+
+// What the plugin keeps of one tab between runs: the machine it sits on, the shell it reads now, and what a shell
+// replacing a dead one is opened with.
+interface TerminalTab { machine: Machine; session: string; title: string; cwd: string }
+
 export async function activate(context: MainContext) {
   // What this plugin keeps between runs: a record per file, read once and written back whole.
   function record<T>(name: string, empty: T) {
@@ -27,7 +34,7 @@ export async function activate(context: MainContext) {
     return { value, save };
   }
 
-  const sessions = record<Record<string, Machine>>('sessions.json', {});
+  const terminals = record<Record<string, TerminalTab>>('terminals.json', {});
   // The last tab number handed out in each workspace: numbers only grow, so a closed tab's number is not reused.
   const tabs = record<Record<string, number>>('tabs.json', {});
   const connections = new Map<string, MachineConnection>();
@@ -54,19 +61,20 @@ export async function activate(context: MainContext) {
     return cwd === await home ? '~' : basename(cwd) || '/';
   }
 
-  async function ref(machine: Machine, node: MachineConnection, session: Session, cwd: string): Promise<TerminalRef> {
+  async function ref(id: string, tab: TerminalTab, node: MachineConnection, cwd: string): Promise<TerminalRef> {
     return {
-      machine,
-      sessionId: session.id,
-      title: session.label ?? session.title,
-      location: await location(machine, node, cwd),
+      machine: tab.machine,
+      tabId: id,
+      sessionId: tab.session,
+      title: tab.title,
+      location: await location(tab.machine, node, cwd),
     };
   }
 
-  function machineOf(sessionId: string) {
-    const machine = sessions.value[sessionId];
-    if (!machine) throw new Error('这个终端已经找不到了');
-    return machine;
+  function tabOf(id: string) {
+    const tab = terminals.value[id];
+    if (!tab) throw new Error('这个终端已经找不到了');
+    return tab;
   }
 
   function nextTitle(active: WorkspaceActive) {
@@ -80,30 +88,35 @@ export async function activate(context: MainContext) {
     const node = await connection(active.machine);
     const cwd = await node.pty.cwd(active.sessionId);
     const title = nextTitle(active);
-    const session = await node.pty.create({ rows: 24, cols: 80 }, { cwd, label: title });
-    sessions.value[session.id] = active.machine;
-    sessions.save();
-    return ref(active.machine, node, session, cwd);
+    const session = await node.pty.create(initialSize, { cwd, label: title });
+    const tab = { machine: active.machine, session: session.id, title, cwd };
+    terminals.value[session.id] = tab;
+    terminals.save();
+    return ref(session.id, tab, node, cwd);
   }));
-  handlers.push(context.ui.handle('describe', async (sessionId: string) => {
-    const machine = machineOf(sessionId);
-    const node = await connection(machine);
-    // The node is what says a session is gone, and its own message is what a window shows for one.
-    const cwd = await node.pty.cwd(sessionId);
-    const session = (await node.pty.list()).find((item) => item.id === sessionId);
-    if (!session) throw new Error('这个终端已经找不到了');
-    return ref(machine, node, session, cwd);
+  handlers.push(context.ui.handle('describe', async (id: string) => {
+    const tab = tabOf(id);
+    const node = await connection(tab.machine);
+    const live = (await node.pty.list()).find((item) => item.id === tab.session && item.exit_code === null);
+    // A shell that died while the app was closed is replaced by one opened where the tab was, under the name it has.
+    if (!live) {
+      const session = await node.pty.create(initialSize, { cwd: tab.cwd, label: tab.title });
+      tab.session = session.id;
+      terminals.save();
+      return ref(id, tab, node, tab.cwd);
+    }
+    return ref(id, tab, node, await node.pty.cwd(live.id));
   }));
-  handlers.push(context.ui.handle('address', (sessionId: string) => {
-    const node = connections.get(key(machineOf(sessionId)));
+  handlers.push(context.ui.handle('address', (id: string) => {
+    const node = connections.get(key(tabOf(id).machine));
     if (!node) throw new Error('Machine is not connected');
     return `ws://localhost:${node.port}`;
   }));
-  handlers.push(context.ui.handle('close', async (sessionId: string) => {
-    const machine = machineOf(sessionId);
-    delete sessions.value[sessionId];
-    sessions.save();
-    try { await (await connection(machine)).pty.close(sessionId); } catch { /* the session is gone either way */ }
+  handlers.push(context.ui.handle('close', async (id: string) => {
+    const tab = tabOf(id);
+    delete terminals.value[id];
+    terminals.save();
+    try { await (await connection(tab.machine)).pty.close(tab.session); } catch { /* the session is gone either way */ }
   }));
 
   return () => {
