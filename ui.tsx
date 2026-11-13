@@ -80,14 +80,13 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
     let chunks: Uint8Array[] = [];
     const flush = () => {
       frame = 0;
-      if (!alive || !shown) { chunks = []; return; }
+      if (!alive) { chunks = []; return; }
       const joined = chunks.length === 1 ? chunks[0] : concat(chunks);
       chunks = [];
       term.write(joined);
     };
     // One write a frame, as the terminal VS Code draws: the agent hands over more frames than the screen needs.
     const feed = (data: Uint8Array) => {
-      if (!shown) return;
       chunks.push(data);
       if (!frame) frame = requestAnimationFrame(flush);
     };
@@ -98,18 +97,8 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
       if (!ready || replaying) return;
       send('resize', { rows: term.rows, cols: term.cols });
     };
-    const close = () => {
-      ready = false;
-      replaying = false;
-      chunks = [];
-      cancelAnimationFrame(frame);
-      frame = 0;
-      if (socket?.readyState === WebSocket.OPEN) send('detach');
-      socket?.close();
-      socket = undefined;
-    };
     const reconnect = (error: Error) => {
-      if (!alive || !shown || retry !== undefined) return;
+      if (!alive || retry !== undefined) return;
       ready = false;
       setError(`${error.message}，正在重连…`);
       retry = setTimeout(() => void connect(), Math.min(1000 * 2 ** attempt++, 5000));
@@ -117,15 +106,15 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
     // The app hands out another port when it reconnects, so every attempt asks for the address again.
     const connect = async () => {
       retry = undefined;
-      if (!alive || !shown) return;
+      if (!alive) return;
       let url: string;
       try { url = await context.ui.request<string>('address', tabId); }
       catch (error) { reconnect(error as Error); return; }
-      if (!alive || !shown) return;
+      if (!alive) return;
       socket = new WebSocket(url);
       // Chromium hands binary frames over as blobs unless it is told otherwise.
       socket.binaryType = 'arraybuffer';
-      socket.onopen = () => { attempt = 0; if (shown) send('attach'); else close(); };
+      socket.onopen = () => { attempt = 0; send('attach'); };
       const decoder = new TextDecoder();
       socket.onmessage = ({ data }) => {
         if (!alive) return;
@@ -134,7 +123,6 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
           if (reply.error) setError(reply.error);
           return;
         }
-        if (!shown) return;
         const bytes = new Uint8Array(data);
         const length = new DataView(data).getUint32(0);
         const event = JSON.parse(decoder.decode(bytes.subarray(4, 4 + length))) as { event: string; rows: number; cols: number };
@@ -157,9 +145,9 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
         }
         feed(payload);
       };
-      socket.onclose = () => { if (alive && shown) reconnect(new Error('终端连接已断开')); };
+      socket.onclose = () => { if (alive) reconnect(new Error('终端连接已断开')); };
     };
-    if (shown) void connect();
+    void connect();
     const input = term.onData((data) => {
       if (!ready || replaying) return;
       send('input', { data });
@@ -167,11 +155,10 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
     const resize = term.onResize(sendSize);
     const observer = new ResizeObserver(() => { if (!replaying) fit(); });
     observer.observe(element.current!);
-    // The tab in front is the only one drawn: a hidden tab lets its session go, and takes it back when it comes in front.
+    // A hidden tab keeps its session attached and its buffer fed, so coming back only fits the grid again: no re-attach, no replay, no reset.
     const shownObserver = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting === shown) return;
       shown = entry.isIntersecting;
-      if (shown) void connect(); else close();
     });
     shownObserver.observe(element.current!);
     return () => {
