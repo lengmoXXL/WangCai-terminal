@@ -263,8 +263,12 @@ function TerminalSessions({ context, view }: { context: UiContext; view: Termina
             onChange={(event) => setDraft(event.target.value)}
             onBlur={() => setRenaming(null)}
             onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== 'Escape') return;
+              // Closing the field puts the terminal under the press while it is still down, and a press left alive
+              // reaches it as a keypress of its own: a Return would run the line the shell is waiting on.
+              event.preventDefault();
               if (event.key === 'Enter') void rename(item.sessionId, draft);
-              else if (event.key === 'Escape') stopRename();
+              else stopRename();
             }} />
           : <button role="tab" aria-selected={item.sessionId === front} title={`${view.machine.name}: ${item.location}`}
             onClick={() => pick(item.sessionId)}>{item.title}</button>}

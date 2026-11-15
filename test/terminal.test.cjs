@@ -172,13 +172,20 @@ test('one tab holds every shell of the workspace, and the bar walks them', { tim
   const two = await watch(test, home, second);
   await typeUntil(page, frontPane, "printf 'SECOND_%s\\n' ok", () => two.text().includes('SECOND_ok'));
 
-  // Ctrl+Shift+R names the shell in front; Enter takes the name and hands the keys back to the terminal.
+  // Ctrl+Shift+R names the shell in front; Enter takes the name and hands the keys back to the terminal, without the
+  // shell seeing a Return of its own: the line typed before the field opened is still waiting after it closes.
+  await page.keyboard.type("printf 'PENDING_%s\\n' ok");
   await page.keyboard.press('Control+Shift+R');
   const field = page.locator(`${bar} .terminal-rename`);
   await field.fill('logs');
   await page.keyboard.press('Enter');
   await until(async () => (await sessionNames(page)).includes('logs'));
   assert.deepEqual(await sessionNames(page), ['t1', 'logs']);
+  // Nothing runs the waiting line, so there is no event to wait for: the press is given the time to have reached it.
+  await page.waitForTimeout(300);
+  assert.ok(!two.text().includes('PENDING_ok'), 'the Return that took the name did not reach the shell');
+  await page.keyboard.press('Enter');
+  await until(() => two.text().includes('PENDING_ok'));
   await page.keyboard.press('Control+Shift+R');
   await field.fill('dropped');
   await page.keyboard.press('Escape');
