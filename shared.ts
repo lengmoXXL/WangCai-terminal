@@ -5,6 +5,8 @@ export type { Machine };
 export type Font = { family: string; size: number; lineHeight: number };
 export type Settings = Profile & { font: Font };
 
-// `tabId` names the tab for as long as it is open, `sessionId` the shell it reads now, `title` what it is shown under
-// and `location` where its shell sits.
-export interface TerminalRef { machine: Machine; tabId: string; sessionId: string; title: string; location: string }
+// One shell of the tab: `sessionId` names the shell it reads now, `title` what the bar calls it, and `location` where
+// that shell sits.
+export interface TerminalSession { sessionId: string; title: string; location: string }
+// The one tab a workspace's terminals share, and every shell it holds, in the order the bar draws them.
+export interface TerminalView { machine: Machine; workspaceId: string; sessions: TerminalSession[] }

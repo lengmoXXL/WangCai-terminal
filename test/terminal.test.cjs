@@ -45,14 +45,18 @@ const closeView = (page) => page.locator('.sidebar-tab:has([aria-selected=true])
 const lists = { workspaces: ['terminal-agent'], tabs: ['files', 'terminal'] };
 const panel = '.sidebar-panel[data-plugin=terminal]';
 const shown = `${panel}:visible`;
-
+// The bar the one tab holds its shells in, and the pane of the shell it has in front.
+const bar = `${shown} .terminal-bar`;
+const frontPane = `${shown} .terminal-pane:not([hidden])`;
+const sessionNames = (page) => page.locator(`${bar} [role=tab]`).allTextContents();
+const frontName = (page) => page.locator(`${bar} [aria-selected=true]`).textContent();
 // The workspace rows the window draws, in their order.
 const tabs = (page) => page.getByRole('tablist', { name: '工作区', exact: true }).getByRole('tab');
 
-// The shell the plugin's own book holds for this home: one it was never asked to close stays in the book, so the
+// The shells the plugin's own book holds, per workspace: one it was never asked to close stays in the book, so the
 // newest entry is the shell the pane is reading.
-const newestSession = (home) => Object.values(JSON.parse(readFileSync(join(home, '.local/share/wangcai/data/terminal/terminals.json'), 'utf8'))).at(-1).session;
-
+const book = (home) => JSON.parse(readFileSync(join(home, '.local/share/wangcai/data/terminal/sessions.json'), 'utf8'));
+const newestSession = (home) => Object.values(book(home)).flatMap((tab) => tab.shells).at(-1).session;
 const binary = join(wangcaiApp(), 'wangcaicli/dist/debug/wangcai');
 
 // The pane draws its rows on a canvas, which tells a test nothing, so its text is read off the stream the node sends
@@ -100,14 +104,15 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   await closeView(page);
 
   await createWorkspace(page);
-  const workspaceSession = await page.evaluate(async () => (await window.wangcai.call('request', 'terminal-agent', 'config')).workspaces[0].sessionId);
+  const workspace = await page.evaluate(async () => (await window.wangcai.call('request', 'terminal-agent', 'config')).workspaces[0]);
   await typeUntil(page, ACTIVE_TERMINAL, `cd '${directory}'`, async () => (await tabs(page).filter({ hasText: '示例 project' }).count()) > 0);
 
   await openView(page, '终端');
   await page.locator(shown).waitFor();
-  assert.equal(await page.locator(shown).getAttribute('aria-label'), '示例 project - t1', 'the tab is named after the workspace and its first tab');
+  assert.equal(await page.locator(shown).getAttribute('aria-label'), '终端', 'the workspace\'s terminals share one tab');
+  assert.deepEqual(await sessionNames(page), ['t1'], 'the first shell is the bar\'s first entry');
   const terminalSession = newestSession(home);
-  assert.notEqual(terminalSession, workspaceSession, 'the view opens a shell of its own');
+  assert.notEqual(terminalSession, workspace.sessionId, 'the view opens a shell of its own');
   const view = await watch(test, home, terminalSession);
   await typeUntil(page, shown, 'printf "TERM_PWD=%s\\n" "$PWD"', () => view.text().includes(`TERM_PWD=${directory}`));
   await close();
@@ -117,7 +122,7 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   ({ page, close } = await open());
   const recovered = page.locator(panel);
   await recovered.locator('.xterm-screen').waitFor();
-  assert.equal(await recovered.getAttribute('aria-label'), '示例 project - t1', 'a tab whose shell died keeps its name');
+  assert.equal(await frontName(page), 't1', 'a shell whose session died keeps its name');
   const replacement = newestSession(home);
   assert.notEqual(replacement, terminalSession, 'the shell that died is replaced by a new one');
   const resumed = await watch(test, home, replacement);
@@ -126,14 +131,14 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
 
   await openView(page, '终端');
   await page.locator(shown).waitFor();
-  assert.equal(await page.locator(shown).getAttribute('aria-label'), '示例 project - t2', 'the workspace is used again, and its numbers only grow');
+  assert.deepEqual(await sessionNames(page), ['t2'], 'the workspace is used again, and its numbers only grow');
   const reopenedSession = newestSession(home);
   const restored = await watch(test, home, reopenedSession);
   await typeUntil(page, shown, 'printf "RESTORED_PWD=%s\\n" "$PWD"', () => restored.text().includes(`RESTORED_PWD=${directory}`));
   await closeView(page);
   // Closing the tab is what takes the session out of the plugin's own book, which is why the call that describes it
   // rejects; the node's list, waited for next, is the layer below, where the shell itself is gone.
-  await until(() => page.evaluate(async (sessionId) => { try { await window.wangcai.call('request', 'terminal', 'describe', sessionId); return false; } catch { return true; } }, reopenedSession));
+  await until(() => page.evaluate(async (workspaceId) => { try { await window.wangcai.call('request', 'terminal', 'describe', workspaceId); return false; } catch { return true; } }, workspace.id));
   await until(async () => {
     const node = await machine();
     const list = await node.pty.list();
@@ -145,6 +150,89 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   ({ page, close } = await open());
   await tabs(page).first().waitFor();
   assert.equal(await page.locator(panel).count(), 0, 'a closed tab is not restored');
+}));
+
+test('one tab holds every shell of the workspace, and the bar walks them', { timeout: 240000 }, (test) => withHome('wangcai-terminal-sessions', lists, async ({ home, open }) => {
+  let { page, close } = await open();
+  await createWorkspace(page);
+  await openView(page, '终端');
+  await page.locator(shown).waitFor();
+  const first = newestSession(home);
+  const one = await watch(test, home, first);
+  await typeUntil(page, frontPane, "printf 'FIRST_%s\\n' ok", () => one.text().includes('FIRST_ok'));
+
+  // A second shell joins the same tab, and is the one in front.
+  await page.locator(`${bar} .terminal-new`).click();
+  await until(async () => (await sessionNames(page)).length === 2);
+  assert.deepEqual(await sessionNames(page), ['t1', 't2']);
+  assert.equal(await frontName(page), 't2', 'a new shell comes to the front');
+  assert.equal(await page.locator('.sidebar-tab:visible').count(), 1, 'and opens no tab of its own');
+  const second = newestSession(home);
+  assert.notEqual(second, first, 'the bar holds a shell of its own');
+  const two = await watch(test, home, second);
+  await typeUntil(page, frontPane, "printf 'SECOND_%s\\n' ok", () => two.text().includes('SECOND_ok'));
+
+  // Ctrl+Shift+R names the shell in front; Enter takes the name and hands the keys back to the terminal.
+  await page.keyboard.press('Control+Shift+R');
+  const field = page.locator(`${bar} .terminal-rename`);
+  await field.fill('logs');
+  await page.keyboard.press('Enter');
+  await until(async () => (await sessionNames(page)).includes('logs'));
+  assert.deepEqual(await sessionNames(page), ['t1', 'logs']);
+  await page.keyboard.press('Control+Shift+R');
+  await field.fill('dropped');
+  await page.keyboard.press('Escape');
+  await field.waitFor({ state: 'detached' });
+  assert.deepEqual(await sessionNames(page), ['t1', 'logs'], 'Escape leaves the name as it was');
+  await until(() => two.text().includes('RENAMED_ok'), {
+    act: async () => { await page.keyboard.type("printf 'RENAMED_%s\\n' ok"); await page.keyboard.press('Enter'); },
+  });
+
+  // The keys walk the bar, and the keys of the page follow the shell they put in front: nothing is clicked between
+  // the press and what is typed after it.
+  const walk = async (key, name, session, mark) => {
+    await page.keyboard.press(key);
+    await until(async () => (await frontName(page)) === name);
+    await until(() => session.text().includes(`${mark}_ok`), {
+      act: async () => { await page.keyboard.type(`printf '${mark}_%s\\n' ok`); await page.keyboard.press('Enter'); },
+    });
+  };
+  await walk('Control+Shift+H', 't1', one, 'BACK');
+  await walk('Control+Shift+L', 'logs', two, 'FORWARD');
+  await walk('Control+Shift+L', 't1', one, 'WRAPPED');
+
+  await close();
+  ({ page, close } = await open());
+  await page.locator(`${panel} .xterm-screen`).first().waitFor();
+  assert.deepEqual(await sessionNames(page), ['t1', 'logs'], 'both shells come back in the one tab, under the names they have');
+  await typeUntil(page, frontPane, "printf 'RESUMED_%s\\n' ok", () => one.text().includes('RESUMED_ok'));
+
+  // Ctrl+Shift+W closes the shell in front and leaves the tab to its neighbour, taking that shell off the node.
+  await page.keyboard.press('Control+Shift+L');
+  await until(async () => (await frontName(page)) === 'logs');
+  await page.keyboard.press('Control+Shift+W');
+  await until(async () => (await sessionNames(page)).length === 1);
+  assert.deepEqual(await sessionNames(page), ['t1']);
+  assert.equal(await frontName(page), 't1', 'the bar falls back to the shell beside the one closed');
+  await until(async () => {
+    const node = await openMachine({ type: 'local', binary, env: { HOME: home } });
+    const list = await node.pty.list();
+    node.disconnect();
+    return list.every((session) => session.id !== second);
+  });
+
+  // Ctrl+Shift+N opens one, under the next number the workspace has not used.
+  await page.keyboard.press('Control+Shift+N');
+  await until(async () => (await sessionNames(page)).length === 2);
+  assert.deepEqual(await sessionNames(page), ['t1', 't3']);
+  assert.equal(await frontName(page), 't3', 'a shell the key opened comes to the front');
+  await page.locator(`${bar} .terminal-session-close`).nth(1).click();
+  await until(async () => (await sessionNames(page)).length === 1);
+
+  // The last shell is the tab: closing it closes the tab, which is what takes the workspace out of the book.
+  await page.locator(`${bar} .terminal-session-close`).click();
+  await page.locator(panel).waitFor({ state: 'detached' });
+  await until(() => Object.keys(book(home)).length === 0);
 }));
 
 test('what a program in the terminal copies reaches the system clipboard', { timeout: 180000 }, () => withWindow('wangcai-terminal-clipboard', lists, async ({ page }) => {
@@ -238,16 +326,12 @@ test('a key that shows the view puts the keys in its terminal', { timeout: 18000
   await type("printf 'SHOWN_%s\\n' ok", 'SHOWN_ok');
 }));
 
-test('two Escapes leave the terminal', { timeout: 180000 }, () => withHome('wangcai-terminal-escape', lists, async ({ open }) => {
+test('Ctrl+Shift+Q leaves the terminal', { timeout: 180000 }, () => withHome('wangcai-terminal-leave', lists, async ({ open }) => {
   const { page } = await open();
   await createWorkspace(page);
   await openView(page, '终端');
   await page.locator(`${shown} .xterm-helper-textarea`).click();
-  // A pair has to land inside the 300ms the window allows, so both presses go out in one go.
-  await page.evaluate((selector) => {
-    const field = document.querySelector(`${selector} .xterm-helper-textarea`);
-    for (let index = 0; index < 2; index += 1) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  }, panel);
-  // The keys stay where the pair put them: the terminal does not take them back.
+  await page.keyboard.press('Control+Shift+Q');
+  // The keys stay where the press put them: the terminal does not take them back.
   await until(() => page.evaluate((selector) => document.querySelector(selector) === document.activeElement, panel));
 }));

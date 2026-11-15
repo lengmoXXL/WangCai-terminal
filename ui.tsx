@@ -6,7 +6,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import type { WorkspaceActive } from '@lengmoxxl/sdk';
 import type { TabRecord, UiContext } from '@lengmoxxl/sdk/channel';
-import type { Settings, TerminalRef } from './shared';
+import { bindKeys, pressIn } from '@lengmoxxl/sdk/keys';
+import type { Settings, TerminalView } from './shared';
 import '@xterm/xterm/css/xterm.css';
 import './style.css';
 
@@ -22,9 +23,8 @@ const concat = (chunks: Uint8Array[]) => {
 let profile: Settings;
 let activeTerminal: WorkspaceActive | null = null;
 
-function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId: string; sessionId: string }) {
+function TerminalPane({ context, workspaceId, sessionId, active }: { context: UiContext; workspaceId: string; sessionId: string; active: boolean }) {
   const element = useRef<HTMLDivElement>(null);
-  const terminal = useRef<Terminal>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -68,7 +68,6 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
       webglAddon.onContextLoss(() => webglAddon.dispose());
       term.loadAddon(webglAddon);
     } catch { /* a GPU that cannot draw here leaves the rows as elements */ }
-    terminal.current = term;
     let alive = true;
     let replaying = false;
     let ready = false;
@@ -108,7 +107,7 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
       retry = undefined;
       if (!alive) return;
       let url: string;
-      try { url = await context.ui.request<string>('address', tabId); }
+      try { url = await context.ui.request<string>('address', workspaceId); }
       catch (error) { reconnect(error as Error); return; }
       if (!alive) return;
       socket = new WebSocket(url);
@@ -155,7 +154,7 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
     const resize = term.onResize(sendSize);
     const observer = new ResizeObserver(() => { if (!replaying) fit(); });
     observer.observe(element.current!);
-    // A hidden tab keeps its session attached and its buffer fed, so coming back only fits the grid again: no re-attach, no replay, no reset.
+    // A shell the bar does not have in front keeps its session attached and its buffer fed, so coming back only fits the grid again: no re-attach, no replay, no reset.
     const shownObserver = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting === shown) return;
       shown = entry.isIntersecting;
@@ -167,39 +166,129 @@ function TerminalPane({ context, tabId, sessionId }: { context: UiContext; tabId
       cancelAnimationFrame(frame);
       input.dispose(); resize.dispose(); observer.disconnect(); shownObserver.disconnect();
       socket?.close(); term.dispose();
-      terminal.current = null;
     };
-  }, [context, tabId, sessionId]);
+  }, [context, workspaceId, sessionId]);
 
-  // A key that shows this view leaves the keys on the page, and what the page draws is a terminal. Two Escapes leave a
-  // field the same way, and there the focus stays where they put it.
-  useEffect(() => {
-    const page = element.current?.closest<HTMLElement>('[data-plugin]');
-    if (!page) return;
-    const focus = () => terminal.current?.focus();
-    page.addEventListener('wangcai:shown', focus);
-    // A page a key opened is focused before the terminal in it exists, so it is taken here as well.
-    if (page === document.activeElement) focus();
-    return () => page.removeEventListener('wangcai:shown', focus);
-  }, []);
-
-  return <div className="terminal-pane">
+  return <div className="terminal-pane" hidden={!active}>
     <div className="terminal-surface" ref={element} />
     {error && <div className="terminal-message error" role="alert">{error}</div>}
   </div>;
 }
 
-function openTab(context: UiContext, tab: TerminalRef & { workspaceId?: string }) {
+// The shell a workspace's tab last had in front, so a tab drawn again comes back to the same one.
+const fronts = new Map<string, string>();
+
+function TerminalSessions({ context, view }: { context: UiContext; view: TerminalView }) {
+  const [sessions, setSessions] = useState(view.sessions);
+  const [front, setFront] = useState(() => (sessions.find((item) => item.sessionId === fronts.get(view.workspaceId)) ?? sessions[0]).sessionId);
+  const [error, setError] = useState('');
+  // The shell whose name is being typed, and what the field holds while it is.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const element = useRef<HTMLDivElement>(null);
+
+  const pick = (sessionId: string) => { fronts.set(view.workspaceId, sessionId); setFront(sessionId); };
+  const step = (direction: number) => {
+    const at = sessions.findIndex((item) => item.sessionId === front);
+    pick(sessions[(at + direction + sessions.length) % sessions.length].sessionId);
+  };
+  const create = async () => {
+    if (!activeTerminal) { setError(noTerminal); return; }
+    try {
+      const next = await context.ui.request<TerminalView>('create', activeTerminal);
+      setSessions(next.sessions);
+      pick(next.sessions.at(-1)!.sessionId);
+    } catch (failure) { setError((failure as Error).message); }
+  };
+  const kill = async (sessionId: string) => {
+    try { await context.ui.request('kill', { workspaceId: view.workspaceId, sessionId }); }
+    catch (failure) { setError((failure as Error).message); return; }
+    const at = sessions.findIndex((item) => item.sessionId === sessionId);
+    const rest = sessions.filter((item) => item.sessionId !== sessionId);
+    // The last shell is the tab itself, which the window closes; closing it is what takes the tab's own entry away.
+    if (!rest.length) { void context.global.publish('core:close-tab', null); return; }
+    // The pane going away takes the focus with it, so the page holds the keys until the shell beside it takes them.
+    if (front === sessionId) {
+      element.current?.closest<HTMLElement>('[data-plugin]')?.focus();
+      pick(rest[Math.max(at - 1, 0)].sessionId);
+    }
+    setSessions(rest);
+  };
+
+  // What the page draws is a terminal, and the keys of the page belong to the shell the bar has in front.
+  const focusFront = () => element.current?.querySelector<HTMLElement>('.terminal-pane:not([hidden]) .xterm-helper-textarea')?.focus();
+  const stopRename = () => { setRenaming(null); focusFront(); };
+  const rename = async (sessionId: string, title: string) => {
+    stopRename();
+    const name = title.trim();
+    if (!name || name === sessions.find((item) => item.sessionId === sessionId)?.title) return;
+    try {
+      await context.ui.request('rename', { workspaceId: view.workspaceId, sessionId, title: name });
+      setSessions(sessions.map((item) => item.sessionId === sessionId ? { ...item, title: name } : item));
+    } catch (failure) { setError((failure as Error).message); }
+  };
+
+  // A key that shows this view leaves the keys on the page, so the shell in front takes them; Ctrl+Shift+Q leaves them
+  // on the page instead, where the bar's own keys still answer.
+  useEffect(() => {
+    const page = element.current?.closest<HTMLElement>('[data-plugin]');
+    if (!page) return;
+    page.addEventListener('wangcai:shown', focusFront);
+    // A page a key opened is focused before the terminal in it exists, so the keys are taken here as well.
+    if (page.contains(document.activeElement)) focusFront();
+    return () => page.removeEventListener('wangcai:shown', focusFront);
+  }, [front]);
+
+  // Ctrl+Shift+H and L walk the bar, N opens a shell, W closes the one in front and R names it. They are bound over the
+  // whole page, the terminal's own field included, and are taken before the terminal reads them; the name field keeps
+  // the keys of its own while it is open.
+  useEffect(() => {
+    const page = element.current?.closest<HTMLElement>('[data-plugin]');
+    if (!page) return;
+    return bindKeys(page, [
+      { keys: '<C-S-h>', run: () => step(-1) },
+      { keys: '<C-S-l>', run: () => step(1) },
+      { keys: '<C-S-n>', run: () => void create() },
+      { keys: '<C-S-w>', run: () => void kill(front) },
+      { keys: '<C-S-r>', run: () => { setDraft(sessions.find((item) => item.sessionId === front)?.title ?? ''); setRenaming(front); } },
+    ], { fields: 'all', ignore: (event) => pressIn(event, '.terminal-rename') });
+  }, [sessions, front]);
+
+  return <div className="terminal-view" ref={element}>
+    <div className="terminal-bar" role="tablist" aria-label="终端会话">
+      {sessions.map((item) => <div className="terminal-session" key={item.sessionId}>
+        {/* Enter takes the name; leaving the field any other way leaves the name as it was. */}
+        {renaming === item.sessionId
+          ? <input className="terminal-rename" autoFocus value={draft} aria-label={`重命名 ${item.title}`}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => setRenaming(null)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void rename(item.sessionId, draft);
+              else if (event.key === 'Escape') stopRename();
+            }} />
+          : <button role="tab" aria-selected={item.sessionId === front} title={`${view.machine.name}: ${item.location}`}
+            onClick={() => pick(item.sessionId)}>{item.title}</button>}
+        <button className="terminal-session-close" aria-label={`关闭 ${item.title}`} onClick={() => void kill(item.sessionId)}>×</button>
+      </div>)}
+      <button className="terminal-new" aria-label="新建终端" onClick={() => void create()}>+</button>
+    </div>
+    {error && <div className="terminal-message error" role="alert">{error}</div>}
+    {sessions.map((item) => <TerminalPane key={item.sessionId} context={context} workspaceId={view.workspaceId}
+      sessionId={item.sessionId} active={item.sessionId === front} />)}
+  </div>;
+}
+
+function openView(context: UiContext, view: TerminalView) {
   context.host.tabs({
-    id: tab.tabId, title: tab.title, tooltip: `${tab.machine.name}: ${tab.location}`, workspaceId: tab.workspaceId,
-    onClose: () => { void context.ui.request('close', tab.tabId).catch(() => {}); },
+    id: 'terminal', title, tooltip: view.machine.name, workspaceId: view.workspaceId,
+    onClose: () => { void context.ui.request('close', view.workspaceId).catch(() => {}); },
     mount(container: HTMLElement) {
       container.classList.add('wangcai-terminal');
       container.style.fontFamily = profile.font.family;
       const root = createRoot(container);
       return {
         // A tab redrawn because the app's list changed is not a selection, so this only redraws and leaves the focus alone.
-        onSelect: () => { root.render(<TerminalPane context={context} tabId={tab.tabId} sessionId={tab.sessionId} />); },
+        onSelect: () => { root.render(<TerminalSessions context={context} view={view} />); },
         dispose: () => root.unmount(),
       };
     },
@@ -227,8 +316,8 @@ export function open(context: UiContext, record?: TabRecord) {
   if (record) {
     // A remembered tab: the message one has no session left to describe.
     if (record.id === 'message') showMessage(context, 'message', noTerminal, record.workspaceId);
-    else void context.ui.request<TerminalRef>('describe', record.id)
-      .then((tab) => openTab(context, { ...tab, workspaceId: record.workspaceId }))
+    else void context.ui.request<TerminalView>('describe', record.workspaceId)
+      .then((view) => openView(context, view))
       .catch((error: Error) => showMessage(context, record.id, error.message, record.workspaceId));
     return;
   }
@@ -237,8 +326,8 @@ export function open(context: UiContext, record?: TabRecord) {
     showMessage(context, 'message', noTerminal);
     return;
   }
-  void context.ui.request<TerminalRef>('open', terminal)
-    .then((tab) => openTab(context, { ...tab, workspaceId: terminal.workspaceId }))
+  void context.ui.request<TerminalView>('open', terminal)
+    .then((view) => openView(context, view))
     .catch((error: Error) => showMessage(context, 'message', error.message, terminal.workspaceId));
 }
 
