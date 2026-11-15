@@ -113,6 +113,10 @@ test('the terminal view opens its own shell in the sidebar, reattaches it and ki
   assert.deepEqual(await sessionNames(page), ['t1'], 'the first shell is the bar\'s first entry');
   const terminalSession = newestSession(home);
   assert.notEqual(terminalSession, workspace.sessionId, 'the view opens a shell of its own');
+  const named = await machine();
+  const label = (await named.pty.list()).find((session) => session.id === terminalSession)?.label;
+  named.disconnect();
+  assert.equal(label, '示例 project - t1', 'the node knows the shell by its workspace and its number');
   const view = await watch(test, home, terminalSession);
   await typeUntil(page, shown, 'printf "TERM_PWD=%s\\n" "$PWD"', () => view.text().includes(`TERM_PWD=${directory}`));
   await close();

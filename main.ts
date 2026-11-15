@@ -20,8 +20,9 @@ const initialSize = { rows: 24, cols: 80 };
 
 // One shell of a tab: the session it reads now, what the bar calls it, and where a shell replacing a dead one is opened.
 interface Shell { session: string; title: string; cwd: string }
-// What the plugin keeps of a workspace between runs: the machine its terminals sit on, and every shell it holds.
-interface TerminalTab { machine: Machine; shells: Shell[] }
+// What the plugin keeps of a workspace between runs: the machine its terminals sit on, the name the node knows the
+// workspace by, and every shell it holds.
+interface TerminalTab { machine: Machine; name: string; shells: Shell[] }
 
 export async function activate(context: MainContext) {
   // What this plugin keeps between runs: a record per file, read once and written back whole.
@@ -69,7 +70,7 @@ export async function activate(context: MainContext) {
     const live = new Set((await node.pty.list()).filter((item) => item.exit_code === null).map((item) => item.id));
     // A shell that died while the app was closed is replaced by one opened where it was, under the name it has.
     for (const shell of tab.shells) {
-      if (!live.has(shell.session)) shell.session = (await node.pty.create(initialSize, { cwd: shell.cwd, label: shell.title })).id;
+      if (!live.has(shell.session)) shell.session = (await node.pty.create(initialSize, { cwd: shell.cwd, label: labelOf(tab, shell.title) })).id;
     }
     terminals.save();
     return {
@@ -96,13 +97,16 @@ export async function activate(context: MainContext) {
     return `t${number}`;
   }
 
+  // The bar calls a shell by its number; the node's own list names the workspace it belongs to as well.
+  const labelOf = (tab: TerminalTab, title: string) => `${tab.name} - ${title}`;
+
   // A shell opened where the workspace's own terminal sits, added to the tab that workspace keeps.
   async function add(active: WorkspaceActive) {
     const node = await connection(active.machine);
     const cwd = await node.pty.cwd(active.sessionId);
+    const tab = terminals.value[active.workspaceId] ??= { machine: active.machine, name: active.name, shells: [] };
     const title = nextTitle(active.workspaceId);
-    const session = await node.pty.create(initialSize, { cwd, label: title });
-    const tab = terminals.value[active.workspaceId] ??= { machine: active.machine, shells: [] };
+    const session = await node.pty.create(initialSize, { cwd, label: labelOf(tab, title) });
     tab.shells.push({ session: session.id, title, cwd });
     terminals.save();
   }
