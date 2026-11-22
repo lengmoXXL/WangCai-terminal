@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
-import type { WorkspaceActive } from '@lengmoxxl/sdk';
+import type { Theme, WorkspaceActive } from '@lengmoxxl/sdk';
 import type { TabRecord, UiContext } from '@lengmoxxl/sdk/channel';
 import { bindKeys, pressIn } from '@lengmoxxl/sdk/keys';
 import type { Settings, TerminalView } from './shared';
@@ -23,6 +23,9 @@ const concat = (chunks: Uint8Array[]) => {
 let profile: Settings;
 let activeTerminal: WorkspaceActive | null = null;
 
+// xterm names the selection by its own word, and takes the rest of the tokens as they are.
+const xtermTheme = (theme: Theme) => ({ ...theme, selectionBackground: theme.selection });
+
 function TerminalPane({ context, workspaceId, sessionId, active }: { context: UiContext; workspaceId: string; sessionId: string; active: boolean }) {
   const element = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
@@ -32,7 +35,7 @@ function TerminalPane({ context, workspaceId, sessionId, active }: { context: Ui
       fontSize: profile.font.size, lineHeight: profile.font.lineHeight,
       fontFamily: profile.font.family,
       scrollback: 10_000,
-      theme: { ...profile.theme, selectionBackground: profile.theme.selection },
+      theme: xtermTheme(profile.theme),
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
@@ -160,11 +163,14 @@ function TerminalPane({ context, workspaceId, sessionId, active }: { context: Ui
       shown = entry.isIntersecting;
     });
     shownObserver.observe(element.current!);
+    // A switch of theme reaches the grid that is already on screen: xterm keeps its colours in its own options, so
+    // nothing here follows the --wc-* tokens the rest of the window reads.
+    const offTheme = context.global.subscribe<Theme>('theme', (theme) => { term.options.theme = xtermTheme(theme); });
     return () => {
       alive = false;
       clearTimeout(retry);
       cancelAnimationFrame(frame);
-      input.dispose(); resize.dispose(); observer.disconnect(); shownObserver.disconnect();
+      input.dispose(); resize.dispose(); observer.disconnect(); shownObserver.disconnect(); offTheme();
       socket?.close(); term.dispose();
     };
   }, [context, workspaceId, sessionId]);
@@ -338,6 +344,7 @@ export function open(context: UiContext, record?: TabRecord) {
 export function mount(_container: HTMLElement, context: UiContext) {
   profile = context.host.config;
   const off = context.global.subscribe<WorkspaceActive | null>('workspace:active', (value) => { activeTerminal = value; });
+  const offTheme = context.global.subscribe<Theme>('theme', (theme) => { profile = { ...profile, theme }; });
   void context.global.publish('workspace:query', null);
-  return off;
+  return () => { off(); offTheme(); };
 }
