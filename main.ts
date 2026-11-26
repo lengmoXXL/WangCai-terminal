@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { MachineConnection, WorkspaceActive } from '@lengmoxxl/sdk';
+import { workspaceAlias, type MachineConnection, type WorkspaceActive } from '@lengmoxxl/sdk';
 import type { MainContext } from '@lengmoxxl/sdk/channel';
 import type { Machine, TerminalView } from './shared';
 
@@ -103,7 +103,7 @@ export async function activate(context: MainContext) {
   // A shell opened where the workspace's own terminal sits, added to the tab that workspace keeps.
   async function add(active: WorkspaceActive) {
     const node = await connection(active.machine);
-    const cwd = await node.pty.cwd(active.sessionId);
+    const cwd = await context.request<string>(workspaceAlias, 'cwd', { workspaceId: active.workspaceId });
     const tab = terminals.value[active.workspaceId] ??= { machine: active.machine, name: active.name, shells: [] };
     const title = nextTitle(active.workspaceId);
     const session = await node.pty.create(initialSize, { cwd, label: labelOf(tab, title) });
